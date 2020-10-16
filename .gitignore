@@ -55,6 +55,7 @@ ipython_config.py
 # .idea/modules
 # *.iml
 # *.ipr
+.idea/*
 
 # CMake
 cmake-build-*/
@@ -259,4 +260,5 @@ dmypy.json
 # End of https://www.toptal.com/developers/gitignore/api/python,pycharm,jupyternotebooks
 
 # Data
-data/*
+data/
+src/maxmind_ip/data/

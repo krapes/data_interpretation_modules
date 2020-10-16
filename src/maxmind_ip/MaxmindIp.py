@@ -48,8 +48,8 @@ class MaxmindIp:
         with open(f"{folder}/config.json", "w") as f:
             json.dump(self.config, f)
 
-    @staticmethod
-    def load_data(sample_size: int = None, date_range: tuple = None) -> pd.DataFrame:
+
+    def load_data(self, sample_size: int = None, date_range: tuple = None) -> pd.DataFrame:
         """ Loads data necessary for training/analyzing this defense
 
             Args: sample_size (int):  Size of the random sample that should be returned
@@ -58,14 +58,16 @@ class MaxmindIp:
 
             Returns: Pandas Dataframe
         """
+        def get_file(filename):
+            return os.path.join(self.dir_path, filename)
         filenames = ['data/maxmind_scores.csv',
                      'data/maxmind_scores2.csv',
                      'data/maxmind_scores3.csv',
                      'data/maxmind_scores4.csv']
 
-        data = pd.read_csv(filenames[0])
+        data = pd.read_csv(get_file(filenames[0]))
         for filename in filenames[1:]:
-            data = data.append(pd.read_csv(filename), ignore_index=True)
+            data = data.append(pd.read_csv(get_file(filename)), ignore_index=True)
         data['when_created'] = pd.to_datetime(data.when_created)
 
         if sample_size:
@@ -73,7 +75,7 @@ class MaxmindIp:
             data = data.sample(n=sample_size, random_state=1)
         if date_range:
             data = data[(data['when_created'] > date_range[0]) & (data['when_created'] < date_range[1])]
-
+        print(f"data length: {len(data)}")
         return data
 
     def train(self,

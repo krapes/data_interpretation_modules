@@ -9,17 +9,22 @@ from matplotlib import pyplot as plt
 import datetime
 import numpy as np
 import random
+import logging
+import sys
+import os
 
-from pyspark.sql.functions import pandas_udf, PandasUDFType
-from pyspark.sql.types import *
-from pyspark.sql import DataFrame
-from pyspark.context import SparkContext
-from pyspark.sql.session import SparkSession
 
-from typing import Dict, Any
+logging.basicConfig(level=logging.INFO)
+logging.StreamHandler(sys.stdout)
+logger = logging.getLogger(__name__)
 
-sc = SparkContext.getOrCreate()
-spark = SparkSession(sc)
+import dask
+import dask.dataframe as dd
+from dask.distributed import Client
+client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
+
+
+from typing import Dict, TypedDict, Any
 
 from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact
 
@@ -30,6 +35,7 @@ class CorridorThresholds(TypedDict):
 
 
 class TrainingModel:
+    dir_path = os.path.dirname(os.path.realpath(__file__))
 
     def __init__(self,
                  data: pd.DataFrame,
@@ -40,6 +46,7 @@ class TrainingModel:
                  repetitions: int = None) -> None:
         self.costs = costs
         self._cutoff = cutoff
+        print(f"TrainingModel Data Size: {len(data)}")
         self._data = today_result(data, cutoff)
         self._repetitions = repetitions if repetitions is not None else 700
         self._lookback = (self.calibrate_lookback(self._data, step=step)
@@ -91,7 +98,7 @@ class TrainingModel:
         """ The number of days between each refitting """
         return self._step
 
-    def fit_function(self, df: DataFrame) -> DataFrame:
+    def fit_function(self, df: pd.DataFrame) -> Dict[str, CorridorThresholds]:
         """ This outer function is the setup for the inner spark-pandas_udf fitting
             function. Here we define the costs dictionary, response schema, and
             repetition parameter.
@@ -102,15 +109,9 @@ class TrainingModel:
             Returns: DataFrame: Contains fitted thresholds for each corridor
         """
         costs = self.costs
-
-        schema = StructType([StructField('corridor', StringType(), True),
-                             StructField('m_effect', DoubleType(), True),
-                             StructField('threshold_top', DoubleType(), True),
-                             StructField('threshold_bottom', DoubleType(), True)])
         repetitions = self._repetitions
 
-        @pandas_udf(schema, PandasUDFType.GROUPED_MAP)
-        def fit(g: DataFrame) -> DataFrame:
+        def fit(g: dask.dataframe) -> Dict[str, float]:
             """ Finds the best scoring top and bottom threshold combinations for
                 data in dataframe g.
 
@@ -151,13 +152,13 @@ class TrainingModel:
                     best_threshold_top = threshold_top
                     best_m = m_effect
 
-            return pd.DataFrame({'corridor': corridor,
-                                 'm_effect': best_m,
-                                 "threshold_top": best_threshold_top,
-                                 "threshold_bottom": best_threshold_bottom},
-                                index=[0])
+            return {"threshold_top": best_threshold_top,
+                    "threshold_bottom": best_threshold_bottom}
 
-        return df.groupby('corridor').apply(fit)
+        results = df.groupby('corridor').apply(fit, meta=object).compute().sort_index()
+        results = {key: value for key, value in zip(results.index, results)}
+        return results
+
 
     def calibrate_thresholds(self, df: pd.DataFrame) -> Dict[str, CorridorThresholds]:
         """ Calculates the best thresholds for each corridor via the fit_function
@@ -167,13 +168,9 @@ class TrainingModel:
 
             Returns dict: contains the best top and bottom threshold for each corridor
         """
-
-        results = self.fit_function(spark.createDataFrame(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna()))
-        result_pdf = results.select("*").toPandas()
-        thresholds = {row['corridor']: {"threshold_top": row['threshold_top'],
-                                        'threshold_bottom': row['threshold_bottom']}
-                      for i, row in result_pdf.iterrows()}
-
+        ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
+                                         npartitions=10)
+        thresholds = self.fit_function(ddf)
         return thresholds
 
     def calibration(self, data: pd.DataFrame, parm: Dict[str, int]) -> (list, list):
@@ -229,7 +226,7 @@ class TrainingModel:
         return impacts, dates
 
     @staticmethod
-    def plot(matrix: Dict[Any, Any], title: str, ax: plt.Axes = None) -> plt.Axes:
+    def plot(matrix: Dict[Any, Any], title: str, save_loc: str, ax: plt.Axes = None) -> plt.Axes:
         """ Plots the x and y list for every key in matrix dictonary
 
             Args: matrix (dict): a dictionary containing:
@@ -251,7 +248,7 @@ class TrainingModel:
                                   label=l,
                                   ax=ax)
         ax.set_title(title)
-        plt.savefig(f"plots/{title}.png")
+        plt.savefig(save_loc)
         return ax
 
     def evaluate(self, data: pd.DataFrame) -> None:
@@ -277,11 +274,11 @@ class TrainingModel:
             step = 14
 
         matrix = {}
-        ax = None
         for lookback in [30, 90, 270, 365]:
             impacts, dates = self.calibration(data, {'lookback': lookback, 'step': step})
             matrix[lookback] = {'y': impacts, 'x': dates}
-            self.plot(matrix, 'Lookback_Results')
+            title = 'Lookback_Results'
+            self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
         scores = [(l, sum(matrix[l]['y'])) for l in matrix.keys()]
         scores.sort(key=lambda tup: tup[1], reverse=True)
         return scores[0][0]
