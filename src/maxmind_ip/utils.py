@@ -73,11 +73,11 @@ def outcome(df: pd.DataFrame, costs: dict, col: str, name: str = 'cost') -> (flo
         Return int: total cost
                 DataFrame: The df DataFrame now containing a "cost" column
     """
-    df[name] = np.nan
-    df[name] = np.where(df[col] == 'fp', costs['cost_fp'] * df['weight'], df[name])
-    df[name] = np.where(df[col] == 'tp', costs['cost_tp'] * df['weight'], df[name])
-    df[name] = np.where(df[col] == 'tn', costs['cost_tn'] * df['weight'], df[name])
-    df[name] = np.where(df[col] == 'fn', costs['cost_fn'] * df['weight'], df[name])
+    df.loc[:, name] = np.nan
+    df.loc[df.index, name] = np.where(df[col] == 'fp', costs['cost_fp'] * df['weight'], df[name])
+    df.loc[df.index, name] = np.where(df[col] == 'tp', costs['cost_tp'] * df['weight'], df[name])
+    df.loc[df.index, name] = np.where(df[col] == 'tn', costs['cost_tn'] * df['weight'], df[name])
+    df.loc[df.index, name] = np.where(df[col] == 'fn', costs['cost_fn'] * df['weight'], df[name])
 
     return float(df[name].sum()), df
 

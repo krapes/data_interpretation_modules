@@ -1,7 +1,7 @@
 import warnings
-
-warnings.simplefilter(action='ignore', category=FutureWarning)
-warnings.simplefilter(action='ignore', category=UserWarning)
+import logging
+import sys
+import os
 
 import pandas as pd
 import seaborn as sns
@@ -9,14 +9,13 @@ from matplotlib import pyplot as plt
 import datetime
 import numpy as np
 import random
-import logging
-import sys
-import os
-
 
 logging.basicConfig(level=logging.INFO)
 logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore', category=UserWarning)
 
 import dask
 import dask.dataframe as dd
@@ -44,7 +43,7 @@ class TrainingModel:
                  step: int = None,
                  cutoff: int = 25,
                  repetitions: int = None) -> None:
-        self.client = client
+        #self.client = client
         self.costs = costs
         self._cutoff = cutoff
         print(f"TrainingModel Data Size: {len(data)}")
@@ -156,7 +155,8 @@ class TrainingModel:
             return {"threshold_top": best_threshold_top,
                     "threshold_bottom": best_threshold_bottom}
 
-        results = df.groupby('corridor').apply(fit, meta=object).compute().sort_index()
+        #results = df.groupby('corridor').apply(fit, meta=object).compute().sort_index()
+        results = df.groupby('corridor').apply(fit)
         results = {key: value for key, value in zip(results.index, results)}
         return results
 
@@ -169,10 +169,12 @@ class TrainingModel:
 
             Returns dict: contains the best top and bottom threshold for each corridor
         """
-        ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
-                                         npartitions=10)
+        #ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
+        #                                 npartitions=10)
+        ddf = df[['corridor', 'risk_score', 'fraud', 'weight']].dropna()
         thresholds = self.fit_function(ddf)
         return thresholds
+
 
     def calibration(self, data: pd.DataFrame, parm: Dict[str, int]) -> (list, list):
         """ Simulates time by walking through the data in intervals of
@@ -275,15 +277,20 @@ class TrainingModel:
             step = 14
 
         matrix = {}
-        for lookback in [30, 90, 270, 365]:
-            impacts, dates = dask.delayed(self.calibration(data, {'lookback': lookback, 'step': step}))
-            matrix[lookback] = {'y': impacts, 'x': dates}
+        delayed_results = []
+        lookbacks = [30, 90, 270, 365]
+        for lookback in lookbacks:
+            delayed_results.append(dask.delayed(self.calibration)(data, {'lookback': lookback, 'step': step}))
         title = 'Lookback_Results'
-        matrix.compute()
+        delayed_results = dask.compute(*delayed_results)
+        for lookback, result in zip(lookbacks, delayed_results):
+            matrix[lookback] = {'y': delayed_results[0], 'x': delayed_results[1]}
         self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
         scores = [(l, sum(matrix[l]['y'])) for l in matrix.keys()]
         scores.sort(key=lambda tup: tup[1], reverse=True)
+        print(f"FINAL SCORE {scores[0][0]}")
         return scores[0][0]
+
 
     def calibrate_step(self, data: pd.DataFrame, lookback: int) -> int:
         """ Finds the best performing step (how often (in time) the thresholds are refitted)
