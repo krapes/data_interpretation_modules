@@ -2,5 +2,15 @@ import sys
 sys.path.append("..")
 
 from src import MaxmindIp
-maxmind = MaxmindIp()
-data = maxmind.train(reset_lookback=True, reset_step=False, sample_size=2000, repetitions=700)
+
+from dask.distributed import Client
+
+
+def main(client):
+    maxmind = MaxmindIp()
+    data = maxmind.train(client, reset_lookback=True, reset_step=False, sample_size=2000, repetitions=700)
+
+
+if __name__ == "__main__":
+    client = Client()
+    main(client)

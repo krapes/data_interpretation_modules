@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 import dask
 import dask.dataframe as dd
-from dask.distributed import Client
-client = Client(n_workers=1, threads_per_worker=8, processes=False, memory_limit='5GB')
+
 
 
 from typing import Dict, TypedDict, Any
@@ -39,11 +38,13 @@ class TrainingModel:
 
     def __init__(self,
                  data: pd.DataFrame,
+                 client: object,
                  costs: Dict[str, int],
                  lookback: int = None,
                  step: int = None,
                  cutoff: int = 25,
                  repetitions: int = None) -> None:
+        self.client = client
         self.costs = costs
         self._cutoff = cutoff
         print(f"TrainingModel Data Size: {len(data)}")

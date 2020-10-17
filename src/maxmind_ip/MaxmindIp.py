@@ -16,6 +16,7 @@ class MaxmindIp:
     def __init__(self):
         self._config = self._load_config()
 
+
     @property
     def config(self):
         """Dictionary containing configuration information like costs, lookback, step,
@@ -79,6 +80,7 @@ class MaxmindIp:
         return data
 
     def train(self,
+              client,
               reset_lookback: bool = False,
               reset_step: bool = False,
               sample_size: bool = None,
@@ -104,6 +106,7 @@ class MaxmindIp:
         if reset_lookback and reset_step:
             data = self.load_data(sample_size=sample_size)
             todays_update = TrainingModel(data,
+                                          client,
                                            self._config['costs'],
                                            cutoff=cutoff,
                                            repetitions=repetitions)
@@ -116,6 +119,7 @@ class MaxmindIp:
             data = self.load_data(sample_size=sample_size)
             step = self._config.get('step', 14)
             todays_update = TrainingModel(data,
+                                          client,
                                            self._config['costs'],
                                            step=step,
                                            cutoff=cutoff,
@@ -127,6 +131,7 @@ class MaxmindIp:
             data = self.load_data(sample_size=sample_size)
             lookback = self.config.get('lookback', 90)
             todays_update = TrainingModel(data,
+                                          client,
                                            self._config['costs'],
                                            lookback=lookback,
                                            cutoff=cutoff,
@@ -141,6 +146,7 @@ class MaxmindIp:
             end = datetime.datetime.now()
             data = self.load_data(date_range=(start, end), sample_size=sample_size)
             todays_update = TrainingModel(data,
+                                          client,
                                            self.config['costs'],
                                            lookback=lookback,
                                            step=step,
