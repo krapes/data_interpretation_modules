@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 import dask
 import dask.dataframe as dd
 from dask.distributed import Client
-client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
+client = Client(n_workers=1, threads_per_worker=8, processes=False, memory_limit='5GB')
 
 
 from typing import Dict, TypedDict, Any
@@ -275,10 +275,11 @@ class TrainingModel:
 
         matrix = {}
         for lookback in [30, 90, 270, 365]:
-            impacts, dates = self.calibration(data, {'lookback': lookback, 'step': step})
+            impacts, dates = dask.delayed(self.calibration(data, {'lookback': lookback, 'step': step}))
             matrix[lookback] = {'y': impacts, 'x': dates}
-            title = 'Lookback_Results'
-            self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
+        title = 'Lookback_Results'
+        matrix.compute()
+        self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
         scores = [(l, sum(matrix[l]['y'])) for l in matrix.keys()]
         scores.sort(key=lambda tup: tup[1], reverse=True)
         return scores[0][0]
