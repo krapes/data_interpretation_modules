@@ -208,23 +208,29 @@ class TrainingModel:
 
             today = data[(data['when_created'] >= date)
                          & (data['when_created'] < date + datetime.timedelta(days=parm['step']))].copy()
-            today = score(today, thresholds, 'risk_score', 'real_result')
-            today['weight'] = 1
+            if len(today) > 0:
+                today = score(today, thresholds, 'risk_score', f"real_result")
+                today['weight'] = 1
 
-            r, today = cal_impact(today, 'today_result', 'real_result', self.costs)
-            data.loc[today.index, f"real_result_{parm['lookback']}_{parm['step']}"] = today['real_result']
-            data.loc[today.index, f"real_result_cost_{parm['lookback']}_{parm['step']}"] = today['real_result_cost']
-            data.loc[today.index, f"today_result_cost_{parm['lookback']}_{parm['step']}"] = today['today_result_cost']
-            data.loc[today.index, 'grp'] = grp
-            for corridor, g in today.groupby('corridor'):
-                if corridor in thresholds.keys():
-                    data.loc[g.index, 'thr_top'] = thresholds[corridor]['threshold_top']
-                    data.loc[g.index, 'thr_bottom'] = thresholds[corridor]['threshold_bottom']
-                else:
-                    data.loc[g.index, 'thr_top'] = np.nan
-                    data.loc[g.index, 'thr_bottom'] = np.nan
-            impacts.append(r)
-            dates.append(date)
+                r, today = cal_impact(today,
+                                      'today_result',
+                                      f"real_result",
+                                      self.costs)
+                data.loc[today.index, f"real_result_{parm['lookback']}_{parm['step']}"] = today['real_result']
+                data.loc[today.index, f"real_result_cost_{parm['lookback']}_{parm['step']}"] = today['real_result_cost']
+                data.loc[today.index, f"today_result_cost_{parm['lookback']}_{parm['step']}"] = today['today_result_cost']
+                data.loc[today.index, 'grp'] = grp
+                for corridor, g in today.groupby('corridor'):
+                    if corridor in thresholds.keys():
+                        data.loc[g.index, 'thr_top'] = thresholds[corridor]['threshold_top']
+                        data.loc[g.index, 'thr_bottom'] = thresholds[corridor]['threshold_bottom']
+                    else:
+                        data.loc[g.index, 'thr_top'] = np.nan
+                        data.loc[g.index, 'thr_bottom'] = np.nan
+                impacts.append(r)
+                dates.append(date)
+            else:
+                logger.info(f"Today had len 0 at date {date}")
 
         return impacts, dates
 
@@ -284,7 +290,7 @@ class TrainingModel:
         title = 'Lookback_Results'
         delayed_results = dask.compute(*delayed_results)
         for lookback, result in zip(lookbacks, delayed_results):
-            matrix[lookback] = {'y': delayed_results[0], 'x': delayed_results[1]}
+            matrix[lookback] = {'y': result[0], 'x': result[1]}
         self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
         scores = [(l, sum(matrix[l]['y'])) for l in matrix.keys()]
         scores.sort(key=lambda tup: tup[1], reverse=True)

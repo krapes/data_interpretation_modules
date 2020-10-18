@@ -10,7 +10,7 @@ from dask.distributed import Client
 def main(client):
     start = time.time()
     maxmind = MaxmindIp()
-    data = maxmind.train(client, reset_lookback=True, reset_step=False, sample_size=200, repetitions=100)
+    data = maxmind.train(client, reset_lookback=True, reset_step=False, sample_size=200, repetitions=5)
 
 
 if __name__ == "__main__":

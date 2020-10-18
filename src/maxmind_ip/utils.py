@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import logging
 
 
 def predict(g: pd.DataFrame,
@@ -73,13 +74,18 @@ def outcome(df: pd.DataFrame, costs: dict, col: str, name: str = 'cost') -> (flo
         Return int: total cost
                 DataFrame: The df DataFrame now containing a "cost" column
     """
-    df.loc[:, name] = np.nan
-    df.loc[df.index, name] = np.where(df[col] == 'fp', costs['cost_fp'] * df['weight'], df[name])
-    df.loc[df.index, name] = np.where(df[col] == 'tp', costs['cost_tp'] * df['weight'], df[name])
-    df.loc[df.index, name] = np.where(df[col] == 'tn', costs['cost_tn'] * df['weight'], df[name])
-    df.loc[df.index, name] = np.where(df[col] == 'fn', costs['cost_fn'] * df['weight'], df[name])
+    if len(df) != 0:
+        df.loc[df.index, name] = np.nan
+        df.loc[df.index, name] = np.where(df[col] == 'fp', costs['cost_fp'] * df['weight'], df[name])
+        df.loc[df.index, name] = np.where(df[col] == 'tp', costs['cost_tp'] * df['weight'], df[name])
+        df.loc[df.index, name] = np.where(df[col] == 'tn', costs['cost_tn'] * df['weight'], df[name])
+        df.loc[df.index, name] = np.where(df[col] == 'fn', costs['cost_fn'] * df['weight'], df[name])
+        total_cost = float(df[name].sum())
+    else:
+        logging.info("Outcome DataFrame is Empty")
+        total_cost = 0
 
-    return float(df[name].sum()), df
+    return total_cost, df
 
 
 def reconcile(df: pd.DataFrame, prediction: str, truth: str, name: str) -> pd.DataFrame:
