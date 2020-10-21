@@ -229,6 +229,7 @@ class TrainingModel:
                         data.loc[g.index, 'thr_bottom'] = np.nan
                 impacts.append(r)
                 dates.append(date)
+                del today
             else:
                 logger.info(f"Today had len 0 at date {date}")
 
