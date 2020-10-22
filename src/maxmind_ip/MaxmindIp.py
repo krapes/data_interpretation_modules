@@ -149,8 +149,7 @@ class MaxmindIp:
                                            cutoff=cutoff,
                                            repetitions=repetitions)
 
-        thresholds = todays_update.calibrate_thresholds(data)
-        self.config['thresholds'] = thresholds
+        self.config['model'] = todays_update.best_case_model
         self._save_config()
 
         todays_update.evaluate(data)

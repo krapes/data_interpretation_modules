@@ -100,6 +100,7 @@ class TrainingModel:
                                           func_file="custom_mse.py")
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
+    _best_case_model = None
 
     def __init__(self,
                  data: pd.DataFrame,
@@ -124,7 +125,7 @@ class TrainingModel:
 
 
     @property
-    def lookback(self):
+    def lookback(self) -> int:
         """ The number of days (or 'time_delta' units) that should be considered when
             fitting the data
         """
@@ -136,7 +137,7 @@ class TrainingModel:
         self._data = self.build_weights(self._data, lookback=self._lookback)
 
     @property
-    def cutoff(self):
+    def cutoff(self) -> int:
         """ The threshold value used in the baseline ("today") approach
         """
         return self._cutoff
@@ -147,7 +148,7 @@ class TrainingModel:
         self._data = self.today_result(self._data, cutoff)
 
     @property
-    def repetitions(self):
+    def repetitions(self) -> int:
         """ The number of threshold guesses that should be tried when fitting
         """
         return self._repetitions
@@ -157,14 +158,25 @@ class TrainingModel:
         self._repetitions = value
 
     @property
-    def data(self):
+    def data(self) -> pd.DataFrame:
         """ Pandas DataFrame containing necessary data"""
         return self._data
 
     @property
-    def step(self):
+    def step(self) -> int:
         """ The number of days between each refitting """
         return self._step
+
+    @property
+    def best_case_model(self, path: str = None) -> str:
+        if self._best_case_model is None:
+            model = self.calibrate_thresholds(self._data)
+            if path is None:
+                path = os.path.join(self.dir_path, 'models/')
+            self._best_case_model = h2o.save_model(model, path=path, force=True)
+            print(type(self._best_case_model))
+        return self._best_case_model
+
 
     def fit_function(self, df: pd.DataFrame) -> Dict[str, CorridorThresholds]:
         """ This outer function is the setup for the inner spark-pandas_udf fitting
@@ -264,6 +276,10 @@ class TrainingModel:
                            'fraud',
                            'weight')
         return model
+
+
+
+
 
     def calibration(self, data: pd.DataFrame, parm: Dict[str, int]) -> (list, list):
         """ Simulates time by walking through the data in intervals of
