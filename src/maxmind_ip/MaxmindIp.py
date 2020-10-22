@@ -79,6 +79,7 @@ class MaxmindIp:
         return data
 
     def train(self,
+              client: object = None,
               reset_lookback: bool = False,
               reset_step: bool = False,
               sample_size: bool = None,
@@ -103,6 +104,7 @@ class MaxmindIp:
         cutoff = self._config.get('cutoff', 25)
         if reset_lookback and reset_step:
             data = self.load_data(sample_size=sample_size)
+            # TODO add test sending client to TrainingModel
             todays_update = TrainingModel(data,
                                            self._config['costs'],
                                            cutoff=cutoff,

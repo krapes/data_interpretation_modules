@@ -12,17 +12,21 @@ import random
 import logging
 import sys
 import os
+import h2o
+from h2o.automl import H2OAutoML
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+from h2o.utils.distributions import CustomDistributionGaussian
 
 
 logging.basicConfig(level=logging.INFO)
 logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
-
+'''
 import dask
 import dask.dataframe as dd
 from dask.distributed import Client
 client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
-
+'''
 
 from typing import Dict, TypedDict, Any
 
@@ -32,9 +36,69 @@ class CorridorThresholds(TypedDict):
     threshold_bottom: float
     thresold_top: float
 
+class AsymmetricLossDistribution(CustomDistributionGaussian):
+
+
+    def gradient(self, y, f):
+        """
+        (Negative half) Gradient of deviance function at predicted value f, for actual response y.
+        Important fot customization of a loss function.
+
+        :param y: actual response
+        :param f: predicted response in link space including offset
+        :return: gradient
+        """
+        '''
+        if y > 0.5 and f > 0.5:
+            # True Positive
+            error = 0
+        elif y > 0.5 and f < 0.5:
+            # False Negative
+            error = -240
+        elif y < 0.5 and f > 0.5:
+            # False Positive
+            error = -60
+        elif y < 0.5 and f < 0.5:
+            # True Negative
+            error = 0
+        '''
+        if y > 0:
+            error = (y - f) * 240
+        else:
+            error = (y - f) * 60
+
+        return error
+
+class CustomAsymmetricMseFunc:
+    def map(self, pred, act, w, o, model):
+        if act > 0:
+            error = 240
+        if act < 0:
+            error = 60
+        return [error * error, 1]
+
+    def reduce(self, l, r):
+        return [l[0] + r[0], l[1] + r[1]]
+
+    def metric(self, l):
+        import java.lang.Math as math
+        return math.sqrt(l[0] / l[1])
+
+
 
 
 class TrainingModel:
+    h2o.init()
+    # Uploaded the custom distribution function
+    name = "asymmetric"
+    distribution_ref = h2o.upload_custom_distribution(AsymmetricLossDistribution,
+                                                           func_name="custom_" + name,
+                                                           func_file="custom_" + name + ".py")
+    # Upload the custom metric
+    metric_ref = h2o.upload_custom_metric(CustomAsymmetricMseFunc,
+                                          func_name="custom_mse",
+                                          func_file="custom_mse.py")
+
     dir_path = os.path.dirname(os.path.realpath(__file__))
 
     def __init__(self,
@@ -44,16 +108,20 @@ class TrainingModel:
                  step: int = None,
                  cutoff: int = 25,
                  repetitions: int = None) -> None:
+
         self.costs = costs
         self._cutoff = cutoff
         print(f"TrainingModel Data Size: {len(data)}")
         self._data = today_result(data, cutoff)
-        self._repetitions = repetitions if repetitions is not None else 700
+        # self._repetitions = repetitions if repetitions is not None else 700
         self._lookback = (self.calibrate_lookback(self._data, step=step)
                           if lookback is None else lookback)
         self._step = (self.calibrate_step(self.data, self.lookback)
                       if step is None else step)
         self._data = build_weights(self._data, lookback=self._lookback)
+
+
+
 
     @property
     def lookback(self):
@@ -110,7 +178,7 @@ class TrainingModel:
         """
         costs = self.costs
         repetitions = self._repetitions
-
+        '''
         def fit(g: dask.dataframe) -> Dict[str, float]:
             """ Finds the best scoring top and bottom threshold combinations for
                 data in dataframe g.
@@ -158,7 +226,26 @@ class TrainingModel:
         results = df.groupby('corridor').apply(fit, meta=object).compute().sort_index()
         results = {key: value for key, value in zip(results.index, results)}
         return results
+    '''
 
+    def train(self, train, x, y, weight):
+        gboost = H2OGradientBoostingEstimator(
+                                           distribution="custom",
+                                           custom_distribution_func=self.distribution_ref,
+                                           custom_metric_func=self.metric_ref
+                                           )
+        gboost.train(x=x, y=y,
+                  training_frame=train,
+                  weights_column=weight
+                  )
+        return gboost
+
+    def df_to_hf(self, df: pd.DataFrame, cols: list, cat_cols: list):
+        cleaned_df = df[cols].dropna()
+        hf = h2o.H2OFrame(cleaned_df)
+        for col in cat_cols:
+            hf[col] = hf[col].asfactor()
+        return hf, cleaned_df
 
     def calibrate_thresholds(self, df: pd.DataFrame) -> Dict[str, CorridorThresholds]:
         """ Calculates the best thresholds for each corridor via the fit_function
@@ -168,10 +255,15 @@ class TrainingModel:
 
             Returns dict: contains the best top and bottom threshold for each corridor
         """
-        ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
-                                         npartitions=10)
-        thresholds = self.fit_function(ddf)
-        return thresholds
+        #ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
+        #                                 npartitions=10)
+        #thresholds = self.fit_function(ddf)
+        train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor'])
+        model = self.train(train,
+                            ['corridor', 'risk_score'],
+                           'fraud',
+                           'weight')
+        return model
 
     def calibration(self, data: pd.DataFrame, parm: Dict[str, int]) -> (list, list):
         """ Simulates time by walking through the data in intervals of
@@ -201,11 +293,17 @@ class TrainingModel:
             print(f"Date: {date}       Lookback: {parm['lookback']}   Step: {parm['step']}")
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
-            thresholds = self.calibrate_thresholds(df)
+            model = self.calibrate_thresholds(df)
 
             today = data[(data['when_created'] >= date)
                          & (data['when_created'] < date + datetime.timedelta(days=parm['step']))].copy()
-            today = score(today, thresholds, 'risk_score', 'real_result')
+            #today = score(today, thresholds, 'risk_score', 'real_result')
+            hf_today, df_w_drops = self.df_to_hf(today, ['corridor', 'risk_score', 'fraud'], ['corridor'])
+            predictions = model.predict(test_data=hf_today).as_data_frame()
+            today.loc[df_w_drops.index, 'prediction'] = predictions.predict.to_list()
+            today['prediction'] = today.prediction.apply(lambda x: 0 if x < 0 else 1)
+            today = reconcile(today, 'prediction', 'fraud', 'real_result')
+
             today['weight'] = 1
 
             r, today = cal_impact(today, 'today_result', 'real_result', self.costs)
@@ -213,6 +311,7 @@ class TrainingModel:
             data.loc[today.index, f"real_result_cost_{parm['lookback']}_{parm['step']}"] = today['real_result_cost']
             data.loc[today.index, f"today_result_cost_{parm['lookback']}_{parm['step']}"] = today['today_result_cost']
             data.loc[today.index, 'grp'] = grp
+            '''
             for corridor, g in today.groupby('corridor'):
                 if corridor in thresholds.keys():
                     data.loc[g.index, 'thr_top'] = thresholds[corridor]['threshold_top']
@@ -220,6 +319,7 @@ class TrainingModel:
                 else:
                     data.loc[g.index, 'thr_top'] = np.nan
                     data.loc[g.index, 'thr_bottom'] = np.nan
+            '''
             impacts.append(r)
             dates.append(date)
 

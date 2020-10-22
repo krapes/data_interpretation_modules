@@ -147,4 +147,5 @@ def cal_impact(df: pd.DataFrame, r1: str, r2: str, costs: dict) -> (float, pd.Da
     new_approach, df = outcome(df, costs, r2, f"{r2}_cost")
     r = new_approach - today
     print(f"The modified system has an impact of {round(r, 2)}")
+    print(f"new_approach: {new_approach}  -  today: {today}")
     return r, df
