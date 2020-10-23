@@ -36,68 +36,12 @@ class CorridorThresholds(TypedDict):
     threshold_bottom: float
     thresold_top: float
 
-class AsymmetricLossDistribution(CustomDistributionGaussian):
-
-
-    def gradient(self, y, f):
-        """
-        (Negative half) Gradient of deviance function at predicted value f, for actual response y.
-        Important fot customization of a loss function.
-
-        :param y: actual response
-        :param f: predicted response in link space including offset
-        :return: gradient
-        """
-        '''
-        if y > 0.5 and f > 0.5:
-            # True Positive
-            error = 0
-        elif y > 0.5 and f < 0.5:
-            # False Negative
-            error = -240
-        elif y < 0.5 and f > 0.5:
-            # False Positive
-            error = -60
-        elif y < 0.5 and f < 0.5:
-            # True Negative
-            error = 0
-        '''
-        if y > 0:
-            error = (y - f) * 240
-        else:
-            error = (y - f) * 60
-
-        return error
-
-class CustomAsymmetricMseFunc:
-    def map(self, pred, act, w, o, model):
-        if act > 0:
-            error = 240
-        if act < 0:
-            error = 60
-        return [error * error, 1]
-
-    def reduce(self, l, r):
-        return [l[0] + r[0], l[1] + r[1]]
-
-    def metric(self, l):
-        import java.lang.Math as math
-        return math.sqrt(l[0] / l[1])
-
 
 
 
 class TrainingModel:
     h2o.init()
-    # Uploaded the custom distribution function
-    name = "asymmetric"
-    distribution_ref = h2o.upload_custom_distribution(AsymmetricLossDistribution,
-                                                           func_name="custom_" + name,
-                                                           func_file="custom_" + name + ".py")
-    # Upload the custom metric
-    metric_ref = h2o.upload_custom_metric(CustomAsymmetricMseFunc,
-                                          func_name="custom_mse",
-                                          func_file="custom_mse.py")
+
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
     _best_case_model = None
@@ -178,74 +122,9 @@ class TrainingModel:
         return self._best_case_model
 
 
-    def fit_function(self, df: pd.DataFrame) -> Dict[str, CorridorThresholds]:
-        """ This outer function is the setup for the inner spark-pandas_udf fitting
-            function. Here we define the costs dictionary, response schema, and
-            repetition parameter.
-
-            Args: df (Spark DataFrame): Contains data entries with risk_score, corridor,
-                                        weight and fraud
-
-            Returns: DataFrame: Contains fitted thresholds for each corridor
-        """
-        costs = self.costs
-        repetitions = self._repetitions
-        '''
-        def fit(g: dask.dataframe) -> Dict[str, float]:
-            """ Finds the best scoring top and bottom threshold combinations for
-                data in dataframe g.
-
-                Args: g (Spark DataFrame of one grouped_map): Entries for fitting
-
-                Returns: (pandas DataFrame): one line dataframe containing fit results
-            """
-
-            def get_thresholds() -> (float, float):
-                """ Generates top and bottom threshold guesses. Top must be
-                    larger than bottom.
-
-                    Returns: int, int: threshold_bottom, threshold_top
-                """
-                threshold_bottom = random.randrange(1, 850, 1)
-                threshold_top = random.randrange(threshold_bottom, 1000, 1)
-                return threshold_bottom / 10, threshold_top / 10
-
-            best_m = None
-            corridor = g['corridor'].unique()[0]
-            print(f"Starting Corridor {corridor}")
-
-            # Thresholds are randomly tried for number 'repetitions' times
-            for _ in range(1, repetitions):
-                threshold_bottom, threshold_top = get_thresholds()
-
-                g = score(g,
-                          {corridor: {"threshold_top": threshold_top,
-                                      "threshold_bottom": threshold_bottom}},
-                          'risk_score',
-                          'result')
-
-                m_effect, _ = outcome(g, costs, 'result')
-
-                # The most effective combination is saved
-                if best_m is None or m_effect > best_m:
-                    best_threshold_bottom = threshold_bottom
-                    best_threshold_top = threshold_top
-                    best_m = m_effect
-
-            return {"threshold_top": best_threshold_top,
-                    "threshold_bottom": best_threshold_bottom}
-
-        results = df.groupby('corridor').apply(fit, meta=object).compute().sort_index()
-        results = {key: value for key, value in zip(results.index, results)}
-        return results
-    '''
 
     def train(self, train, x, y, weight):
-        gboost = H2OGradientBoostingEstimator(
-                                           distribution="custom",
-                                           custom_distribution_func=self.distribution_ref,
-                                           custom_metric_func=self.metric_ref
-                                           )
+        gboost = H2OGradientBoostingEstimator()
         gboost.train(x=x, y=y,
                   training_frame=train,
                   weights_column=weight
@@ -270,7 +149,7 @@ class TrainingModel:
         #ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
         #                                 npartitions=10)
         #thresholds = self.fit_function(ddf)
-        train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor'])
+        train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
         model = self.train(train,
                             ['corridor', 'risk_score'],
                            'fraud',
@@ -317,7 +196,7 @@ class TrainingModel:
             hf_today, df_w_drops = self.df_to_hf(today, ['corridor', 'risk_score', 'fraud'], ['corridor'])
             predictions = model.predict(test_data=hf_today).as_data_frame()
             today.loc[df_w_drops.index, 'prediction'] = predictions.predict.to_list()
-            today['prediction'] = today.prediction.apply(lambda x: 0 if x < 0 else 1)
+            #today['prediction'] = today.prediction.apply(lambda x: 0 if x < 0 else 1)
             today = reconcile(today, 'prediction', 'fraud', 'real_result')
 
             today['weight'] = 1

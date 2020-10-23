@@ -9,7 +9,7 @@ from .utils import predict, avg_value
 
 logger = logging.getLogger(__name__)
 
-class MaxmindIp(TrainingModel):
+class MaxmindIp():
     dir_path = os.path.dirname(os.path.realpath(__file__))
     config_location = os.path.join(dir_path, 'config')
 

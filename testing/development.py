@@ -31,5 +31,5 @@ def plot_loss_eval():
 
 if __name__ == "__main__":
     #client = Client(memory_limit='8GB')
-    #main()
-    plot_loss_eval()
+    main()
+    #plot_loss_eval()
