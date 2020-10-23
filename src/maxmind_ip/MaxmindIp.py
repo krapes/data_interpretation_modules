@@ -9,7 +9,7 @@ from .utils import predict, avg_value
 
 logger = logging.getLogger(__name__)
 
-class MaxmindIp:
+class MaxmindIp(TrainingModel):
     dir_path = os.path.dirname(os.path.realpath(__file__))
     config_location = os.path.join(dir_path, 'config')
 
@@ -69,7 +69,7 @@ class MaxmindIp:
         for filename in filenames[1:]:
             data = data.append(pd.read_csv(get_file(filename)), ignore_index=True)
         data['when_created'] = pd.to_datetime(data.when_created)
-
+        print(f"data available: {len(data)}")
         if sample_size:
             logging.info(f"Using sample_size {sample_size}")
             data = data.sample(n=sample_size, random_state=1)
