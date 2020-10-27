@@ -26,6 +26,7 @@ class MaxmindIp():
     def config(self, value):
         self._config = value
 
+
     @staticmethod
     def _load_config(folder: str = config_location) -> dict:
         """ Loads the configuration file for this defense
@@ -83,7 +84,8 @@ class MaxmindIp():
               reset_lookback: bool = False,
               reset_step: bool = False,
               sample_size: bool = None,
-              repetitions: bool = None) -> pd.DataFrame:
+              repetitions: bool = None,
+              evaluate: bool = False) -> pd.DataFrame:
         """ This function retrains/refits the data and overwrites the config with the results
 
             Args: reset_lookback(bool): Lookback is the window in time for data is considered
@@ -150,9 +152,11 @@ class MaxmindIp():
                                            repetitions=repetitions)
 
         self.config['model'] = todays_update.best_case_model
+        print(todays_update.best_case_model, self.config['model'])
         self._save_config()
 
-        todays_update.evaluate(data)
+        if evaluate:
+            todays_update.evaluate(data)
 
         return todays_update.data
 

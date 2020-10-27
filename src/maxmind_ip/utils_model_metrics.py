@@ -11,9 +11,9 @@ class MapeMetric:
 class CostMatrixLossMetric:
     def map(self, predicted, actual, weight, offset, model):
         cost_tp = 0 # set prior to use
-        cost_tn = 0 # set prior to use
-        cost_fp = 1 # set prior to use
-        cost_fn = 3 # set prior to use
+        cost_tn = -0.1 # set prior to use
+        cost_fp = 60 # set prior to use
+        cost_fn = 2400000 # set prior to use
 
         c1 = cost_tp + cost_tn - cost_fp - cost_fn
         c2 = cost_fn - cost_tn

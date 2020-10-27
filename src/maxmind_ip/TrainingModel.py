@@ -16,6 +16,7 @@ import h2o
 from h2o.automl import H2OAutoML
 from h2o.estimators.gbm import H2OGradientBoostingEstimator
 from h2o.utils.distributions import CustomDistributionGaussian
+from h2o.grid.grid_search import H2OGridSearch
 
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +31,9 @@ client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit
 
 from typing import Dict, TypedDict, Any
 
-from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact
+from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact, predict
+from .utils_model_metrics import WeightedFalseNegativeLossMetric, CostMatrixLossMetric
+
 
 class CorridorThresholds(TypedDict):
     threshold_bottom: float
@@ -42,6 +45,12 @@ class CorridorThresholds(TypedDict):
 class TrainingModel:
     h2o.init()
 
+    #weighted_false_negative_loss_func = h2o.upload_custom_metric(WeightedFalseNegativeLossMetric,
+    #                                                             func_name="WeightedFalseNegativeLoss",
+    #                                                             func_file="weighted_false_negative_loss.py")
+    cost_matrix_loss_metric_func = h2o.upload_custom_metric(CostMatrixLossMetric,
+                                                                 func_name="CostMatrixLossMetric",
+                                                                 func_file="cost_matrix_loss_metric.py")
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
     _best_case_model = None
@@ -53,7 +62,7 @@ class TrainingModel:
                  step: int = None,
                  cutoff: int = 25,
                  repetitions: int = None) -> None:
-
+        print(f"lookback: {lookback}  step: {step}")
         self.costs = costs
         self._cutoff = cutoff
         print(f"TrainingModel Data Size: {len(data)}")
@@ -124,12 +133,62 @@ class TrainingModel:
 
 
     def train(self, train, x, y, weight):
-        gboost = H2OGradientBoostingEstimator()
+        '''
+        gboost = H2OGradientBoostingEstimator(custom_metric_func=self.weighted_false_negative_loss_func)
         gboost.train(x=x, y=y,
                   training_frame=train,
                   weights_column=weight
                   )
-        return gboost
+        '''
+        def sort_models(gbm_grid: object) -> list:
+            functioning_list_of_models = []
+            for model_name in gbm_grid.model_ids:
+                try:
+                    result = [h2o.get_model(model_name).model_performance(xval=True).custom_metric_value(), model_name]
+                    functioning_list_of_models.append(result)
+                except AttributeError:
+                    print(f"Error with {x}")
+                    pass
+
+            outputs = sorted(functioning_list_of_models)
+            for output in outputs:
+                print(output)
+            return outputs
+
+        gbm_hyper_parameters = {'learn_rate': [0.01, 0.1]}#,
+                                #'max_depth': [3, 5, 9],
+                                #'sample_rate': [0.8, 1.0],
+                                #'col_sample_rate': [0.2, 0.5, 1.0]}
+        print(gbm_hyper_parameters)
+        gbm_grid = H2OGridSearch(H2OGradientBoostingEstimator(custom_metric_func=self.cost_matrix_loss_metric_func,
+                                                              nfolds=3),
+                                 gbm_hyper_parameters)
+        gbm_grid.train(x=x, y=y, training_frame=train, weights_column="weight", grid_id="gbm_grid")
+
+        best_model = h2o.get_model(sort_models(gbm_grid)[0][1])
+        #best_model.show()
+        train_pd = train.as_data_frame()
+        train_pd['model_score'] = best_model.predict(test_data=train).as_data_frame()['p1']
+        matrix = {'basic': {'x': [], 'y': []}}
+        for t in range(1, 100):
+            t = t/100
+            train_pd['prediction'] = predict(train_pd, t, 1, 'model_score')
+            train_pd = reconcile(train_pd, 'prediction', 'fraud', f"CM_{t}")
+            t_cost, train_pd = outcome(train_pd, {'cost_tp': 0, 'cost_fp': 60, 'cost_fn': 2400000, 'cost_tn': -0.1}, f"CM_{t}", f"costs_{t}")
+            matrix['basic']['x'].append(t)
+            matrix['basic']['y'].append(t_cost)
+        title = 'threshold_calculation'
+        self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
+        #cost_metric = CostMatrixLossMetric()
+        #train_pd['cost'] = train_pd.apply(lambda row: cost_metric.map([None, None, row.prediction], [row.fraud], row.weight, row.index, row.index)[0], axis=1)
+        print(train_pd[[f"costs_{t}", 'prediction', 'fraud', 'model_score']])
+        print(train_pd.model_score.max(), train_pd.model_score.min())
+
+        optimum_threshold = matrix['basic']['x'][matrix['basic']['y'].index(min(matrix['basic']['y']))]
+        print(f"optimum_threshold: {optimum_threshold}")
+        print(best_model.confusion_matrix(thresholds=optimum_threshold))
+
+        return best_model
 
     def df_to_hf(self, df: pd.DataFrame, cols: list, cat_cols: list):
         cleaned_df = df[cols].dropna()
