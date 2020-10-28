@@ -9,11 +9,14 @@ class MapeMetric:
         return last[0] / last[1]
 
 class CostMatrixLossMetric:
+
+    cost_dict = {'cost_tp': 0, 'cost_fp': 60, 'cost_tn': -0.1, 'cost_fn': 235}
+
     def map(self, predicted, actual, weight, offset, model):
-        cost_tp = 0 # set prior to use
-        cost_tn = -0.1 # set prior to use
-        cost_fp = 60 # set prior to use
-        cost_fn = 240 # set prior to use
+        cost_tp = self.cost_dict['cost_tp'] # set prior to use
+        cost_tn = self.cost_dict['cost_tn'] # set prior to use
+        cost_fp = self.cost_dict['cost_fp'] # set prior to use
+        cost_fn = self.cost_dict['cost_fn'] # set prior to use
 
         c1 = cost_tp + cost_tn - cost_fp - cost_fn
         c2 = cost_fn - cost_tn

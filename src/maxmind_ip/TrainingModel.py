@@ -16,6 +16,7 @@ from h2o.automl import H2OAutoML
 from h2o.estimators.gbm import H2OGradientBoostingEstimator
 from h2o.grid.grid_search import H2OGridSearch
 from h2o.estimators import H2OGenericEstimator
+import re
 
 root = logging.getLogger()
 root.setLevel(logging.INFO)
@@ -23,18 +24,9 @@ logging.basicConfig(level=logging.INFO)
 logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
 
-'''
-import dask
-import dask.dataframe as dd
-from dask.distributed import Client
-client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
-'''
-
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Tuple, List
 
 from .utils import outcome, reconcile, today_result, build_weights, cal_impact, predict
-from .utils_model_metrics import CostMatrixLossMetric
-
 
 
 class TrainingModel:
@@ -194,8 +186,7 @@ class TrainingModel:
 
         return best_model
 
-    @staticmethod
-    def train_gradientboosting(train: h2o.H2OFrame,
+    def train_gradientboosting(self, train: h2o.H2OFrame,
                                x: List[str],
                                y: str,
                                weight: str,
@@ -240,21 +231,40 @@ class TrainingModel:
             Return:
                 H2OGridSearch : trained grid
             """
+            gbm_hyper_parameters = {'learn_rate': [0.01, 0.1],
+                                    'max_depth': [3, 5, 9],
+                                    'sample_rate': [0.8, 1.0],
+                                    'col_sample_rate': [0.2, 0.5, 1.0]}
+            logger.info(f"Searching Hyper Parameter Space:\n {gbm_hyper_parameters}")
             grid = H2OGridSearch(base_model,
-                                     gbm_hyper_parameters,
-                                     search_criteria={'strategy': "RandomDiscrete", 'max_runtime_secs': 120})
+                                 gbm_hyper_parameters,
+                                 search_criteria={'strategy': "RandomDiscrete", 'max_runtime_secs': 120})
             grid.train(x=x, y=y, training_frame=train, weights_column=weight, grid_id="gbm_grid")
             return grid
 
-        gbm_hyper_parameters = {'learn_rate': [0.01, 0.1],
-                                'max_depth': [3, 5, 9],
-                                'sample_rate': [0.8, 1.0],
-                                'col_sample_rate': [0.2, 0.5, 1.0]}
-        print(f"Searching Hyper Parameter Space:\n {gbm_hyper_parameters}")
+        def get_cost_matrix_loss_metric_class() -> object:
+            """ This function modifies the text in the file utils_model_metrics to include the cost dictionary in
+                this instance before importing the file. The strategy is messy and I don't believe it is the correct
+                way to do this, but it is the only way I could find to complete the tasks inside the allotted time
+                today.
+            Returns the class CostMatrixLossMetric with cost dictionary overwritten
+            """
+            file_path = os.path.join(self.dir_path, 'utils_model_metrics.py')
+            with open(file_path, 'r') as file:
+                file_data = file.read()
+            target = r"\{'cost_tp': -?\d*\.?\d, 'cost_fp': -?\d*\.?\d, 'cost_tn': -?\d*\.?\d*, 'cost_fn': -?\d*\.?\d*\}"
+            file_data = re.sub(target, str(self.inverse_costs), file_data)
+            with open(file_path, 'w') as file:
+                file.write(file_data)
+                print("file written")
+
+            from .utils_model_metrics import CostMatrixLossMetric
+            return CostMatrixLossMetric
 
         if cost_matrix_loss_metric:
             # If cost_matrix_loss_metric upload it to cluster and include it in base model
-            cost_matrix_loss_metric_func = h2o.upload_custom_metric(CostMatrixLossMetric,
+
+            cost_matrix_loss_metric_func = h2o.upload_custom_metric(get_cost_matrix_loss_metric_class(),
                                                                     func_name="CostMatrixLossMetric",
                                                                     func_file="cost_matrix_loss_metric.py")
             base_model = H2OGradientBoostingEstimator(custom_metric_func=cost_matrix_loss_metric_func,
@@ -324,7 +334,7 @@ class TrainingModel:
         train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
         if model_type == 'GradientBoosting':
             logging.info(f"Training Gradient Boosting {'with' if cost_matrix_loss_metric else 'without'} " +
-                             "cost_matrix_loss_metric")
+                         "cost_matrix_loss_metric")
             model = self.train_gradientboosting(train,
                                                 ['corridor', 'risk_score'],
                                                 'fraud',
@@ -371,7 +381,8 @@ class TrainingModel:
             # Train model
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
-            model, threshold = self.calibrate_thresholds(df, model_type='GradientBoosting', cost_matrix_loss_metric=True)
+            model, threshold = self.calibrate_thresholds(df, model_type='GradientBoosting',
+                                                         cost_matrix_loss_metric=True)
 
             # Take the data one step in the future of the date and evaluate how the model would have done
             today = data[(data['when_created'] >= date)
