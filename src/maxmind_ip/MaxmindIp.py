@@ -84,7 +84,6 @@ class MaxmindIp():
               reset_lookback: bool = False,
               reset_step: bool = False,
               sample_size: bool = None,
-              repetitions: bool = None,
               evaluate: bool = False) -> pd.DataFrame:
         """ This function retrains/refits the data and overwrites the config with the results
 
@@ -109,8 +108,7 @@ class MaxmindIp():
             # TODO add test sending client to TrainingModel
             todays_update = TrainingModel(data,
                                            self._config['costs'],
-                                           cutoff=cutoff,
-                                           repetitions=repetitions)
+                                           cutoff=cutoff)
             self.config['lookback'] = todays_update.lookback
             self.config['step'] = todays_update.step
             logger.info(f"Lookback length set to {self._config['lookback']}")
@@ -122,8 +120,7 @@ class MaxmindIp():
             todays_update = TrainingModel(data,
                                            self._config['costs'],
                                            step=step,
-                                           cutoff=cutoff,
-                                           repetitions=repetitions)
+                                           cutoff=cutoff)
             self._config['lookback'] = todays_update.lookback
             logger.info(f"Lookback length set to {self._config['lookback']}")
 
@@ -133,8 +130,7 @@ class MaxmindIp():
             todays_update = TrainingModel(data,
                                            self._config['costs'],
                                            lookback=lookback,
-                                           cutoff=cutoff,
-                                           repetitions=repetitions)
+                                           cutoff=cutoff)
             self.config['step'] = todays_update.step
             logger.info(f"Step length set to {self._config['step']}")
 
@@ -148,8 +144,7 @@ class MaxmindIp():
                                            self.config['costs'],
                                            lookback=lookback,
                                            step=step,
-                                           cutoff=cutoff,
-                                           repetitions=repetitions)
+                                           cutoff=cutoff)
 
         self.config['model'] = todays_update.best_case_model
         print(todays_update.best_case_model, self.config['model'])

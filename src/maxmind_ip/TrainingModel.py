@@ -30,9 +30,9 @@ from dask.distributed import Client
 client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
 '''
 
-from typing import Dict, TypedDict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List
 
-from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact, predict
+from .utils import outcome, reconcile, today_result, build_weights, cal_impact, predict
 from .utils_model_metrics import CostMatrixLossMetric
 
 
@@ -48,13 +48,11 @@ class TrainingModel:
                  costs: Dict[str, int],
                  lookback: int = None,
                  step: int = None,
-                 cutoff: int = 25,
-                 repetitions: int = None) -> None:
-        print(f"lookback: {lookback}  step: {step}")
+                 cutoff: int = 25) -> None:
+
         self.costs = costs
         self.inverse_costs = {key: value * -1 for (key, value) in costs.items()}
         self._cutoff = cutoff
-        print(f"TrainingModel Data Size: {len(data)}")
         self._data = today_result(data, cutoff)
         self._lookback = (self.calibrate_lookback(self._data, step=step)
                           if lookback is None else lookback)
@@ -233,10 +231,7 @@ class TrainingModel:
                     print(f"Error with {x}")
                     pass
 
-            outputs = sorted(functioning_list_of_models)
-            for output in outputs:
-                print(output)
-            return outputs
+            return sorted(functioning_list_of_models)
 
         def grid_train(base_model: H2OGradientBoostingEstimator) -> H2OGridSearch:
             """ Given base model train a search grid to find the optimum hyper parameters
@@ -372,10 +367,13 @@ class TrainingModel:
             date += datetime.timedelta(days=parm['step'])
             grp += 1
             print(f"Date: {date}       Lookback: {parm['lookback']}   Step: {parm['step']}")
+
+            # Train model
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
             model, threshold = self.calibrate_thresholds(df, model_type='GradientBoosting', cost_matrix_loss_metric=True)
 
+            # Take the data one step in the future of the date and evaluate how the model would have done
             today = data[(data['when_created'] >= date)
                          & (data['when_created'] < date + datetime.timedelta(days=parm['step']))].copy()
             hf_today, df_w_drops = self.df_to_hf(today, ['corridor', 'risk_score', 'fraud'], ['corridor'])
@@ -383,8 +381,10 @@ class TrainingModel:
             today['prediction'] = predict(today, threshold, 1, 'prediction')
             today = reconcile(today, 'prediction', 'fraud', 'real_result')
 
+            # All data is of the same importance when testing
             today['weight'] = 1
 
+            # Calculate the monetary impact of the model verse the the baseline
             r, today = cal_impact(today, 'today_result', 'real_result', self.costs)
             data.loc[today.index, f"real_result_{parm['lookback']}_{parm['step']}"] = today['real_result']
             data.loc[today.index, f"real_result_cost_{parm['lookback']}_{parm['step']}"] = today['real_result_cost']
@@ -404,7 +404,7 @@ class TrainingModel:
         return impacts, dates
 
     @staticmethod
-    def plot(matrix: Dict[Any, Any], title: str, save_loc: str, ax: plt.Axes = None) -> plt.Axes:
+    def plot(matrix: Dict[str, dict], title: str, save_loc: str, ax: plt.Axes = None) -> plt.Axes:
         """ Plots the x and y list for every key in matrix dictonary
 
             Args: matrix (dict): a dictionary containing:
