@@ -3,16 +3,16 @@ import pandas as pd
 
 
 def predict(g: pd.DataFrame,
-            threshold_bottom: int,
-            threshold_top: int,
+            threshold_bottom: float,
+            threshold_top: float,
             target_score: str) -> np.array:
     """ This function accepts a pandas dataframe and 1 where the target_score
         column is between the top and bottom thresholds, otherwise returns 0.
 
         Args: g (DataFrame): pandas dataframe containing the target_score column
-              threshold_bottom (int): minimum value of target_column necessary to
+              threshold_bottom (float): minimum value of target_column necessary to
                                       be considered 1
-              threshold_top (int): maximum value of target_column necessary to be
+              threshold_top (float): maximum value of target_column necessary to be
                                    be considered 1
               target_score (str):  column name that should be compared to the top
                                       and bottom thresholds

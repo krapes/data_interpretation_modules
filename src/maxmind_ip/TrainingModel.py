@@ -18,7 +18,7 @@ from h2o.automl import H2OAutoML
 from h2o.estimators.gbm import H2OGradientBoostingEstimator
 from h2o.utils.distributions import CustomDistributionGaussian
 from h2o.grid.grid_search import H2OGridSearch
-
+from h2o.estimators import H2OGenericEstimator
 
 root = logging.getLogger()
 root.setLevel(logging.INFO)
@@ -33,7 +33,7 @@ from dask.distributed import Client
 client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
 '''
 
-from typing import Dict, TypedDict, Any, Tuple
+from typing import Dict, TypedDict, Any, Tuple, List
 
 from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact, predict
 from .utils_model_metrics import WeightedFalseNegativeLossMetric, CostMatrixLossMetric
@@ -44,17 +44,12 @@ class CorridorThresholds(TypedDict):
     thresold_top: float
 
 
-
-
 class TrainingModel:
     h2o.init()
 
-    #weighted_false_negative_loss_func = h2o.upload_custom_metric(WeightedFalseNegativeLossMetric,
+    # weighted_false_negative_loss_func = h2o.upload_custom_metric(WeightedFalseNegativeLossMetric,
     #                                                             func_name="WeightedFalseNegativeLoss",
     #                                                             func_file="weighted_false_negative_loss.py")
-    cost_matrix_loss_metric_func = h2o.upload_custom_metric(CostMatrixLossMetric,
-                                                                 func_name="CostMatrixLossMetric",
-                                                                 func_file="cost_matrix_loss_metric.py")
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
     _best_case_model = None
@@ -78,9 +73,6 @@ class TrainingModel:
         self._step = (self.calibrate_step(self.data, self.lookback)
                       if step is None else step)
         self._data = build_weights(self._data, lookback=self._lookback)
-
-
-
 
     @property
     def lookback(self) -> int:
@@ -140,8 +132,7 @@ class TrainingModel:
             print(type(self._best_case_model))
         return self._best_case_model
 
-
-    def optimum_threshold(self, hf: h2o.H2OFrame, model: h2o.H2OModel) -> float:
+    def optimum_threshold(self, hf: h2o.H2OFrame, model: H2OGenericEstimator) -> float:
         """ Selects the best threshold for this model given the cost values of this instance
 
         Args:
@@ -158,7 +149,7 @@ class TrainingModel:
         matrix = {str(model.model_id): {'x': [], 'y': []}}
         # Calculate cost function for ever 1/100 ranging from 0 to 1
         for t in range(1, 100):
-            t = t/100
+            t = t / 100
             df['prediction'] = predict(df, t, 1, 'model_score')
             df = reconcile(df, 'prediction', 'fraud', f"CM_{t}")
             t_cost, df = outcome(df, self.inverse_costs, f"CM_{t}", f"costs_{t}")
@@ -168,7 +159,8 @@ class TrainingModel:
         self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
 
         # Return threshold that produced the minimum cost
-        optimum_threshold = matrix['basic']['x'][matrix['basic']['y'].index(min(matrix['basic']['y']))]
+        idx_min_cost = matrix[str(model.model_id)]['y'].index(min(matrix[str(model.model_id)]['y']))
+        optimum_threshold = matrix[str(model.model_id)]['x'][idx_min_cost]
         print(f"optimum_threshold: {optimum_threshold}")
         return optimum_threshold
 
@@ -180,6 +172,7 @@ class TrainingModel:
                   weights_column=weight
                   )
         '''
+
         def sort_models(gbm_grid: object) -> list:
             functioning_list_of_models = []
             for model_name in gbm_grid.model_ids:
@@ -194,6 +187,7 @@ class TrainingModel:
             for output in outputs:
                 print(output)
             return outputs
+
         '''
         gbm_hyper_parameters = {'learn_rate': [0.01, 0.1],
                                 'max_depth': [3, 5, 9],
@@ -208,50 +202,144 @@ class TrainingModel:
 
         best_model = h2o.get_model(sort_models(gbm_grid)[0][1])
         '''
-        aml = H2OAutoML(max_runtime_secs=5*60, seed=1)
-        aml.train(x=x, y=y, training_frame=train, weights_column = "weight")
+        aml = H2OAutoML(max_runtime_secs=5 * 60, seed=1)
+        aml.train(x=x, y=y, training_frame=train, weights_column="weight")
         best_model = aml.leader
-
 
         return best_model
 
-    def df_to_hf(self, df: pd.DataFrame, cols: list[str], cat_cols: list[str]) -> Tuple[h2o.H2OFrame, pd.DataFrame]:
+    @staticmethod
+    def train_gradientboosting(train: h2o.H2OFrame,
+                               x: List[str],
+                               y: str,
+                               weight: str,
+                               cost_matrix_loss_metric: bool) -> H2OGenericEstimator:
+        """ Use a  H2O gradient boosting base model and a gridsearch to build model
+
+        Args:
+            train (h2o dataframe): training data containing columns x, y, and weight
+            x (list of str): column names of model features
+            y (list of str): column name of ground truth
+            weight (str): column name of row weights
+
+        Return
+            H2OGenericEstimator: best model out of the training grid
+
+        """
+
+        def sort_models(grid: H2OGridSearch) -> List[List[float, str]]:
+            functioning_list_of_models = []
+            for model_name in grid.model_ids:
+                try:
+                    result = [h2o.get_model(model_name).model_performance(xval=True).custom_metric_value(), model_name]
+                    functioning_list_of_models.append(result)
+                except AttributeError:
+                    print(f"Error with {x}")
+                    pass
+
+            outputs = sorted(functioning_list_of_models)
+            for output in outputs:
+                print(output)
+            return outputs
+
+        def grid_train(base_model: H2OGradientBoostingEstimator) -> H2OGridSearch:
+            grid = H2OGridSearch(base_model,
+                                     gbm_hyper_parameters,
+                                     search_criteria={'strategy': "RandomDiscrete", 'max_runtime_secs': 120})
+            grid.train(x=x, y=y, training_frame=train, weights_column=weight, grid_id="gbm_grid")
+            return grid
+
+        gbm_hyper_parameters = {'learn_rate': [0.01, 0.1],
+                                'max_depth': [3, 5, 9],
+                                'sample_rate': [0.8, 1.0],
+                                'col_sample_rate': [0.2, 0.5, 1.0]}
+        print(f"Searching Hyper Parameter Space:\n {gbm_hyper_parameters}")
+
+        if cost_matrix_loss_metric:
+            cost_matrix_loss_metric_func = h2o.upload_custom_metric(CostMatrixLossMetric,
+                                                                    func_name="CostMatrixLossMetric",
+                                                                    func_file="cost_matrix_loss_metric.py")
+            base_model = H2OGradientBoostingEstimator(custom_metric_func=cost_matrix_loss_metric_func,
+                                                      nfolds=3)
+            gbm_grid = grid_train(base_model)
+            best_model = h2o.get_model(sort_models(gbm_grid)[0][1])
+        else:
+            base_model = H2OGradientBoostingEstimator(nfolds=3)
+            gbm_grid = grid_train(base_model)
+            best_model = gbm_grid.get_grid(sort_by='auc', decreasing=True).models[0]
+
+        return best_model
+
+    @staticmethod
+    def train_automl(train: h2o.H2OFrame, x: List[str], y: str, weight: str) -> H2OGenericEstimator:
+        """ Use AutoML to build model
+
+        Args:
+            train (h2o dataframe): training data containing columns x, y, and weight
+            x (list of str): column names of model features
+            y (list of str): column name of ground truth
+            weight (str): column name of row weights
+
+        Return
+            H2OGenericEstimator: best model out of the training grid
+
+        """
+        aml = H2OAutoML(max_runtime_secs=5 * 60, seed=1)
+        aml.train(x=x, y=y, training_frame=train, weights_column=weight)
+        best_model = aml.leader
+
+        return best_model
+
+    def df_to_hf(self, df: pd.DataFrame, cols: List[str], cat_cols: List[str]) -> Tuple[h2o.H2OFrame, pd.DataFrame]:
         """ Converts a pandas dataframe into a h2o dataframe. Part of the conversion includes dropping null
             values because they create errors in h2o training and declaring any categorical columns (asfactor)
         Args:
             df (pandas dataframe): DataFrame to be converted
             cols (list of str): column names to be extracted from df
             cat_cols (list of str): column names that are categorical
+        Returns:
+            hf: H2O dataframe
+            cleaned_df: A pandas dataframe containing the same rows, columns, and indexes as hf
         """
+
         cleaned_df = df[cols].dropna()
         hf = h2o.H2OFrame(cleaned_df)
         for col in cat_cols:
             hf[col] = hf[col].asfactor()
         return hf, cleaned_df
 
-
-    def calibrate_thresholds(self, df: pd.DataFrame) -> Tuple[h2o.H2OModel, float]:
+    def calibrate_thresholds(self, df: pd.DataFrame,
+                             model_type: str = 'H2OAutoML',
+                             cost_matrix_loss_metric: bool = False) -> Tuple[H2OGenericEstimator, float]:
         """ Calculates the best thresholds for each corridor via the fit_function
 
             Args: df (DataFrame): data containing information necessary for calibration
-                  verbose (bool): if True the function will log progress
+                  model_type (str): the type of model or strategy that should be used
+                  cost_matrix_loss_metric (bool): if true, training and model selection will be performed with
+                                                    the CostMatrixLossMetric class
 
-            Returns dict: contains the best top and bottom threshold for each corridor
+            Returns H2OModel, float: trained model and it corresponding threshold
         """
 
         train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
-        model = self.train(train,
-                            ['corridor', 'risk_score'],
-                           'fraud',
-                           'weight')
+        if model_type == 'GradientBoosting':
+            logging.info(f"Training Gradient Boosting {'with' if cost_matrix_loss_metric else 'without'} " +
+                             "cost_matrix_loss_metric")
+            model = self.train_gradientboosting(train,
+                                                ['corridor', 'risk_score'],
+                                                'fraud',
+                                                'weight',
+                                                cost_matrix_loss_metric)
+        else:
+            logging.info("Training AutoML")
+            model = self.train_automl(train,
+                                      ['corridor', 'risk_score'],
+                                      'fraud',
+                                      'weight')
 
         threshold = self.optimum_threshold(train, model)
         print(model.confusion_matrix(thresholds=threshold))
         return model, threshold
-
-
-
-
 
     def calibration(self, data: pd.DataFrame, parm: Dict[str, int]) -> (list, list):
         """ Simulates time by walking through the data in intervals of
@@ -290,7 +378,6 @@ class TrainingModel:
             today['prediction'] = predict(today, threshold, 1, 'prediction')
             today = reconcile(today, 'prediction', 'fraud', 'real_result')
 
-
             today['weight'] = 1
 
             r, today = cal_impact(today, 'today_result', 'real_result', self.costs)
@@ -308,10 +395,12 @@ class TrainingModel:
                     data.loc[g.index, 'thr_bottom'] = np.nan
             '''
             # Wipe the cloud with a cluster restart
-            # (the models will no longer be available)
+            # (the models, grids, and functions will no longer be available)
             h2o.cluster().shutdown()
             time.sleep(5)
             h2o.init()
+
+            # append information gained in this iteration
             impacts.append(r)
             dates.append(date)
 
@@ -366,8 +455,8 @@ class TrainingModel:
             step = 14
 
         matrix = {}
-        #chosen_corridor = data.corridor.unique()[0]
-        #print(f"The chosen corridor is {chosen_corridor}")
+        # chosen_corridor = data.corridor.unique()[0]
+        # print(f"The chosen corridor is {chosen_corridor}")
         for lookback in [30, 90, 270, 365]:
             impacts, dates = self.calibration(data, {'lookback': lookback, 'step': step})
             matrix[lookback] = {'y': impacts, 'x': dates}
