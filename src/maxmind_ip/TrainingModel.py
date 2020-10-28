@@ -227,13 +227,21 @@ class TrainingModel:
 
         """
 
-        def sort_models(grid: H2OGridSearch) -> List[List[float, str]]:
+        def sort_models(grid: H2OGridSearch) -> List[list]:
+            """ Sorts models in the grid by their custom_metric_value or the score reported by the custom
+                metric set at model declaration.
+            Args:
+                grid (H2OGridSearch): a grid search object containing models with the custom metric
+            Returns:
+                Sorted list of decreasing custom_metric_value
+            """
             functioning_list_of_models = []
             for model_name in grid.model_ids:
                 try:
                     result = [h2o.get_model(model_name).model_performance(xval=True).custom_metric_value(), model_name]
                     functioning_list_of_models.append(result)
                 except AttributeError:
+                    # Some models fail because they don't have a custom_metric_value, it's unclear why at this time
                     print(f"Error with {x}")
                     pass
 
@@ -243,6 +251,12 @@ class TrainingModel:
             return outputs
 
         def grid_train(base_model: H2OGradientBoostingEstimator) -> H2OGridSearch:
+            """ Given base model train a search grid to find the optimum hyper parameters
+            Args:
+                base_model (H2OGradientBoostingEstimator): model that should be used in hyper parameter search
+            Return:
+                H2OGridSearch : trained grid
+            """
             grid = H2OGridSearch(base_model,
                                      gbm_hyper_parameters,
                                      search_criteria={'strategy': "RandomDiscrete", 'max_runtime_secs': 120})
@@ -256,12 +270,15 @@ class TrainingModel:
         print(f"Searching Hyper Parameter Space:\n {gbm_hyper_parameters}")
 
         if cost_matrix_loss_metric:
+            # If cost_matrix_loss_metric upload it to cluster and include it in base model
             cost_matrix_loss_metric_func = h2o.upload_custom_metric(CostMatrixLossMetric,
                                                                     func_name="CostMatrixLossMetric",
                                                                     func_file="cost_matrix_loss_metric.py")
             base_model = H2OGradientBoostingEstimator(custom_metric_func=cost_matrix_loss_metric_func,
                                                       nfolds=3)
             gbm_grid = grid_train(base_model)
+            # Custom metrics are not available in .get_grid so we must use our own function to select the
+            # best model
             best_model = h2o.get_model(sort_models(gbm_grid)[0][1])
         else:
             base_model = H2OGradientBoostingEstimator(nfolds=3)
@@ -369,7 +386,7 @@ class TrainingModel:
             print(f"Date: {date}       Lookback: {parm['lookback']}   Step: {parm['step']}")
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
-            model, threshold = self.calibrate_thresholds(df)
+            model, threshold = self.calibrate_thresholds(df, model_type='GradientBoosting')
 
             today = data[(data['when_created'] >= date)
                          & (data['when_created'] < date + datetime.timedelta(days=parm['step']))].copy()
