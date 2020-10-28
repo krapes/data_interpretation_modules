@@ -33,7 +33,7 @@ from dask.distributed import Client
 client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
 '''
 
-from typing import Dict, TypedDict, Any
+from typing import Dict, TypedDict, Any, Tuple
 
 from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact, predict
 from .utils_model_metrics import WeightedFalseNegativeLossMetric, CostMatrixLossMetric
@@ -68,6 +68,7 @@ class TrainingModel:
                  repetitions: int = None) -> None:
         print(f"lookback: {lookback}  step: {step}")
         self.costs = costs
+        self.inverse_costs = {key: value * -1 for (key, value) in costs.items()}
         self._cutoff = cutoff
         print(f"TrainingModel Data Size: {len(data)}")
         self._data = today_result(data, cutoff)
@@ -126,6 +127,11 @@ class TrainingModel:
 
     @property
     def best_case_model(self, path: str = None) -> str:
+        """ The best model that can be produced for future predictions
+        Args:
+            path (str): Optional location of saved model
+        Return:
+        """
         if self._best_case_model is None:
             model, threshold = self.calibrate_thresholds(self._data)
             if path is None:
@@ -135,6 +141,36 @@ class TrainingModel:
         return self._best_case_model
 
 
+    def optimum_threshold(self, hf: h2o.H2OFrame, model: h2o.H2OModel) -> float:
+        """ Selects the best threshold for this model given the cost values of this instance
+
+        Args:
+            df (DataFrame): Data used for evaluation. Must contain ground truth column named fraud
+            model (H2OModel): A model object to be evaluated
+        Returns: optimum_threshold (float): Indicates that if a model p1 value is less than this number
+                                            the prediction is 0 (not fraud). If the model p1 value is greater than
+                                            this number the prediction is 1 (fraud)
+        """
+        # Extract the probability of the positive class from the predictions
+        df = hf.as_data_frame()
+        df['model_score'] = model.predict(test_data=hf).as_data_frame()['p1']
+
+        matrix = {str(model.model_id): {'x': [], 'y': []}}
+        # Calculate cost function for ever 1/100 ranging from 0 to 1
+        for t in range(1, 100):
+            t = t/100
+            df['prediction'] = predict(df, t, 1, 'model_score')
+            df = reconcile(df, 'prediction', 'fraud', f"CM_{t}")
+            t_cost, df = outcome(df, self.inverse_costs, f"CM_{t}", f"costs_{t}")
+            matrix[str(model.model_id)]['x'].append(t)
+            matrix[str(model.model_id)]['y'].append(t_cost)
+        title = f'threshold_calculation_{model.model_id}'
+        self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
+
+        # Return threshold that produced the minimum cost
+        optimum_threshold = matrix['basic']['x'][matrix['basic']['y'].index(min(matrix['basic']['y']))]
+        print(f"optimum_threshold: {optimum_threshold}")
+        return optimum_threshold
 
     def train(self, train, x, y, weight):
         '''
@@ -172,41 +208,29 @@ class TrainingModel:
 
         best_model = h2o.get_model(sort_models(gbm_grid)[0][1])
         '''
-        aml = H2OAutoML(max_runtime_secs=3600, seed=1)
+        aml = H2OAutoML(max_runtime_secs=5*60, seed=1)
         aml.train(x=x, y=y, training_frame=train, weights_column = "weight")
         best_model = aml.leader
-        train_pd = train.as_data_frame()
-        train_pd['model_score'] = best_model.predict(test_data=train).as_data_frame()['p1']
-        matrix = {'basic': {'x': [], 'y': []}}
-        start_time = time.time()
-        for t in range(1, 100):
-            if t % 10 == 0:
-                elapsed_time = time.time() - start_time
-                estimatation_per_loop = elapsed_time / t
-                print(f"Working on {t} of 100. Expected wait time {round(estimatation_per_loop * (100 - t) * 60, 2)}")
-            t = t/100
-            train_pd['prediction'] = predict(train_pd, t, 1, 'model_score')
-            train_pd = reconcile(train_pd, 'prediction', 'fraud', f"CM_{t}")
-            t_cost, train_pd = outcome(train_pd, {'cost_tp': 0, 'cost_fp': 60, 'cost_fn': 240, 'cost_tn': -0.1}, f"CM_{t}", f"costs_{t}")
-            matrix['basic']['x'].append(t)
-            matrix['basic']['y'].append(t_cost)
-        title = 'threshold_calculation'
-        self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
 
-        optimum_threshold = matrix['basic']['x'][matrix['basic']['y'].index(min(matrix['basic']['y']))]
-        print(f"optimum_threshold: {optimum_threshold}")
-        print(best_model.confusion_matrix(thresholds=optimum_threshold))
 
-        return best_model, optimum_threshold
+        return best_model
 
-    def df_to_hf(self, df: pd.DataFrame, cols: list, cat_cols: list):
+    def df_to_hf(self, df: pd.DataFrame, cols: list[str], cat_cols: list[str]) -> Tuple[h2o.H2OFrame, pd.DataFrame]:
+        """ Converts a pandas dataframe into a h2o dataframe. Part of the conversion includes dropping null
+            values because they create errors in h2o training and declaring any categorical columns (asfactor)
+        Args:
+            df (pandas dataframe): DataFrame to be converted
+            cols (list of str): column names to be extracted from df
+            cat_cols (list of str): column names that are categorical
+        """
         cleaned_df = df[cols].dropna()
         hf = h2o.H2OFrame(cleaned_df)
         for col in cat_cols:
             hf[col] = hf[col].asfactor()
         return hf, cleaned_df
 
-    def calibrate_thresholds(self, df: pd.DataFrame) -> Dict[str, CorridorThresholds]:
+
+    def calibrate_thresholds(self, df: pd.DataFrame) -> Tuple[h2o.H2OModel, float]:
         """ Calculates the best thresholds for each corridor via the fit_function
 
             Args: df (DataFrame): data containing information necessary for calibration
@@ -214,14 +238,15 @@ class TrainingModel:
 
             Returns dict: contains the best top and bottom threshold for each corridor
         """
-        #ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
-        #                                 npartitions=10)
-        #thresholds = self.fit_function(ddf)
+
         train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
-        model, threshold = self.train(train,
+        model = self.train(train,
                             ['corridor', 'risk_score'],
                            'fraud',
                            'weight')
+
+        threshold = self.optimum_threshold(train, model)
+        print(model.confusion_matrix(thresholds=threshold))
         return model, threshold
 
 
@@ -262,7 +287,7 @@ class TrainingModel:
                          & (data['when_created'] < date + datetime.timedelta(days=parm['step']))].copy()
             hf_today, df_w_drops = self.df_to_hf(today, ['corridor', 'risk_score', 'fraud'], ['corridor'])
             today.loc[df_w_drops.index, 'prediction'] = model.predict(test_data=hf_today).as_data_frame()['p1']
-            today['prediction'] = today.prediction.apply(lambda x: 0 if x < threshold else 1)
+            today['prediction'] = predict(today, threshold, 1, 'prediction')
             today = reconcile(today, 'prediction', 'fraud', 'real_result')
 
 
@@ -341,10 +366,10 @@ class TrainingModel:
             step = 14
 
         matrix = {}
-        chosen_corridor = data.corridor.unique()[0]
-        print(f"The chosen corridor is {chosen_corridor}")
+        #chosen_corridor = data.corridor.unique()[0]
+        #print(f"The chosen corridor is {chosen_corridor}")
         for lookback in [30, 90, 270, 365]:
-            impacts, dates = self.calibration(data[data['corridor'] == chosen_corridor], {'lookback': lookback, 'step': step})
+            impacts, dates = self.calibration(data, {'lookback': lookback, 'step': step})
             matrix[lookback] = {'y': impacts, 'x': dates}
             title = 'Lookback_Results'
             self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
