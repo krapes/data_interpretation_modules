@@ -3,6 +3,8 @@ import datetime
 import json
 import os
 import logging
+import seaborn as sns
+from matplotlib import pyplot as plt
 
 from .TrainingModel import TrainingModel
 from .utils import predict, avg_value
@@ -184,3 +186,24 @@ class MaxmindIp:
 
         # Value returned as float to maintain consistency with receiving script
         return float(result)
+
+    def plot_vs_baseline(self) -> plt.Axes:
+        data = self._data
+        plt.figure(figsize=(15, 8))
+        ax = sns.lineplot(data=data, x='grp', y='real_result_cost', label='real_result_cost')
+        ax = sns.lineplot(data=data, x='grp', y='today_result_cost', label='today_result_cost', ax=ax)
+        return ax
+
+    def plot_step_lookback_analysis(self):
+        data = self._data
+        fig, axes = plt.subplots(nrows=2, figsize=(15, 24))
+        col_dic = {col: 'sum' for col in data.columns
+                   if 'real_result_cost' in col or 'today_result_cost' in col}
+        date_agg = data.groupby(pd.to_datetime(data.when_created).dt.month).agg(col_dic)
+
+        for col in col_dic.keys():
+            if col not in ['real_result_cost', 'today_result_cost']:
+                date_agg[f"impact_{col}"] = date_agg[col] - date_agg['today_result_cost']
+                sns.lineplot(data=date_agg, x=date_agg.index, y=col, ax=axes[0], label=col)
+                if 'today' not in col:
+                    sns.lineplot(data=date_agg, x=date_agg.index, y=f"impact_{col}", ax=axes[1], label=f"impact_{col}")
