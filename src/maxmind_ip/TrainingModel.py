@@ -7,8 +7,6 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 import datetime
-import numpy as np
-import random
 import time
 import logging
 import sys
@@ -16,7 +14,6 @@ import os
 import h2o
 from h2o.automl import H2OAutoML
 from h2o.estimators.gbm import H2OGradientBoostingEstimator
-from h2o.utils.distributions import CustomDistributionGaussian
 from h2o.grid.grid_search import H2OGridSearch
 from h2o.estimators import H2OGenericEstimator
 
@@ -36,20 +33,12 @@ client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit
 from typing import Dict, TypedDict, Any, Tuple, List
 
 from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact, predict
-from .utils_model_metrics import WeightedFalseNegativeLossMetric, CostMatrixLossMetric
+from .utils_model_metrics import CostMatrixLossMetric
 
-
-class CorridorThresholds(TypedDict):
-    threshold_bottom: float
-    thresold_top: float
 
 
 class TrainingModel:
     h2o.init()
-
-    # weighted_false_negative_loss_func = h2o.upload_custom_metric(WeightedFalseNegativeLossMetric,
-    #                                                             func_name="WeightedFalseNegativeLoss",
-    #                                                             func_file="weighted_false_negative_loss.py")
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
     _best_case_model = None
@@ -67,7 +56,6 @@ class TrainingModel:
         self._cutoff = cutoff
         print(f"TrainingModel Data Size: {len(data)}")
         self._data = today_result(data, cutoff)
-        # self._repetitions = repetitions if repetitions is not None else 700
         self._lookback = (self.calibrate_lookback(self._data, step=step)
                           if lookback is None else lookback)
         self._step = (self.calibrate_step(self.data, self.lookback)
@@ -386,7 +374,7 @@ class TrainingModel:
             print(f"Date: {date}       Lookback: {parm['lookback']}   Step: {parm['step']}")
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
-            model, threshold = self.calibrate_thresholds(df, model_type='GradientBoosting')
+            model, threshold = self.calibrate_thresholds(df, model_type='GradientBoosting', cost_matrix_loss_metric=True)
 
             today = data[(data['when_created'] >= date)
                          & (data['when_created'] < date + datetime.timedelta(days=parm['step']))].copy()
@@ -402,15 +390,7 @@ class TrainingModel:
             data.loc[today.index, f"real_result_cost_{parm['lookback']}_{parm['step']}"] = today['real_result_cost']
             data.loc[today.index, f"today_result_cost_{parm['lookback']}_{parm['step']}"] = today['today_result_cost']
             data.loc[today.index, 'grp'] = grp
-            '''
-            for corridor, g in today.groupby('corridor'):
-                if corridor in thresholds.keys():
-                    data.loc[g.index, 'thr_top'] = thresholds[corridor]['threshold_top']
-                    data.loc[g.index, 'thr_bottom'] = thresholds[corridor]['threshold_bottom']
-                else:
-                    data.loc[g.index, 'thr_top'] = np.nan
-                    data.loc[g.index, 'thr_bottom'] = np.nan
-            '''
+
             # Wipe the cloud with a cluster restart
             # (the models, grids, and functions will no longer be available)
             h2o.cluster().shutdown()
@@ -472,8 +452,6 @@ class TrainingModel:
             step = 14
 
         matrix = {}
-        # chosen_corridor = data.corridor.unique()[0]
-        # print(f"The chosen corridor is {chosen_corridor}")
         for lookback in [30, 90, 270, 365]:
             impacts, dates = self.calibration(data, {'lookback': lookback, 'step': step})
             matrix[lookback] = {'y': impacts, 'x': dates}
