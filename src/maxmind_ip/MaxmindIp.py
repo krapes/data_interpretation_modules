@@ -9,7 +9,8 @@ from .utils import predict, avg_value
 
 logger = logging.getLogger(__name__)
 
-class MaxmindIp():
+
+class MaxmindIp:
     dir_path = os.path.dirname(os.path.realpath(__file__))
     config_location = os.path.join(dir_path, 'config')
 
@@ -25,7 +26,6 @@ class MaxmindIp():
     @config.setter
     def config(self, value):
         self._config = value
-
 
     @staticmethod
     def _load_config(folder: str = config_location) -> dict:
@@ -49,7 +49,6 @@ class MaxmindIp():
         with open(f"{folder}/config.json", "w") as f:
             json.dump(self.config, f)
 
-
     def load_data(self, sample_size: int = None, date_range: tuple = None) -> pd.DataFrame:
         """ Loads data necessary for training/analyzing this defense
 
@@ -59,8 +58,10 @@ class MaxmindIp():
 
             Returns: Pandas Dataframe
         """
+
         def get_file(filename):
             return os.path.join(self.dir_path, filename)
+
         filenames = ['data/maxmind_scores.csv',
                      'data/maxmind_scores2.csv',
                      'data/maxmind_scores3.csv',
@@ -105,10 +106,9 @@ class MaxmindIp():
         cutoff = self._config.get('cutoff', 25)
         if reset_lookback and reset_step:
             data = self.load_data(sample_size=sample_size)
-            # TODO add test sending client to TrainingModel
             todays_update = TrainingModel(data,
-                                           self._config['costs'],
-                                           cutoff=cutoff)
+                                          self._config['costs'],
+                                          cutoff=cutoff)
             self.config['lookback'] = todays_update.lookback
             self.config['step'] = todays_update.step
             logger.info(f"Lookback length set to {self._config['lookback']}")
@@ -118,9 +118,9 @@ class MaxmindIp():
             data = self.load_data(sample_size=sample_size)
             step = self._config.get('step', 14)
             todays_update = TrainingModel(data,
-                                           self._config['costs'],
-                                           step=step,
-                                           cutoff=cutoff)
+                                          self._config['costs'],
+                                          step=step,
+                                          cutoff=cutoff)
             self._config['lookback'] = todays_update.lookback
             logger.info(f"Lookback length set to {self._config['lookback']}")
 
@@ -128,9 +128,9 @@ class MaxmindIp():
             data = self.load_data(sample_size=sample_size)
             lookback = self.config.get('lookback', 90)
             todays_update = TrainingModel(data,
-                                           self._config['costs'],
-                                           lookback=lookback,
-                                           cutoff=cutoff)
+                                          self._config['costs'],
+                                          lookback=lookback,
+                                          cutoff=cutoff)
             self.config['step'] = todays_update.step
             logger.info(f"Step length set to {self._config['step']}")
 
@@ -141,10 +141,10 @@ class MaxmindIp():
             end = datetime.datetime.now()
             data = self.load_data(date_range=(start, end), sample_size=sample_size)
             todays_update = TrainingModel(data,
-                                           self.config['costs'],
-                                           lookback=lookback,
-                                           step=step,
-                                           cutoff=cutoff)
+                                          self.config['costs'],
+                                          lookback=lookback,
+                                          step=step,
+                                          cutoff=cutoff)
 
         self.config['model'] = todays_update.best_case_model
         print(todays_update.best_case_model, self.config['model'])
@@ -164,6 +164,7 @@ class MaxmindIp():
 
         Returns int: 0 for not risky behavior 1 for risky behavior
         """
+        # TODO modify inference script
         corridor = f"{send_country}-{receive_country}"
         thresholds = self.config['thresholds']
         known_corridors = thresholds.keys()
@@ -177,12 +178,9 @@ class MaxmindIp():
             threshold_top = corridor_thresholds['threshold_top']
 
         result = predict(pd.DataFrame({'risk_score': risk_score}, index=[0]),
-                             threshold_bottom,
-                             threshold_top,
-                             'risk_score')[0]
+                         threshold_bottom,
+                         threshold_top,
+                         'risk_score')[0]
 
         # Value returned as float to maintain consistency with receiving script
         return float(result)
-
-
-

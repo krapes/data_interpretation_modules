@@ -3,7 +3,6 @@ sys.path.append("..")
 
 from src import MaxmindIp
 from helpers import function_time
-#from dask.distributed import Client
 
 import h2o
 
@@ -18,6 +17,4 @@ def main():
     h2o.cluster().shutdown()
 
 if __name__ == "__main__":
-    #client = Client(memory_limit='8GB')
     main()
-    #plot_loss_eval()

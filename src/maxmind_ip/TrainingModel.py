@@ -142,50 +142,6 @@ class TrainingModel:
         print(f"optimum_threshold: {optimum_threshold}")
         return optimum_threshold
 
-    def train(self, train, x, y, weight):
-        '''
-        gboost = H2OGradientBoostingEstimator(custom_metric_func=self.weighted_false_negative_loss_func)
-        gboost.train(x=x, y=y,
-                  training_frame=train,
-                  weights_column=weight
-                  )
-        '''
-
-        def sort_models(gbm_grid: object) -> list:
-            functioning_list_of_models = []
-            for model_name in gbm_grid.model_ids:
-                try:
-                    result = [h2o.get_model(model_name).model_performance(xval=True).custom_metric_value(), model_name]
-                    functioning_list_of_models.append(result)
-                except AttributeError:
-                    print(f"Error with {x}")
-                    pass
-
-            outputs = sorted(functioning_list_of_models)
-            for output in outputs:
-                print(output)
-            return outputs
-
-        '''
-        gbm_hyper_parameters = {'learn_rate': [0.01, 0.1],
-                                'max_depth': [3, 5, 9],
-                                'sample_rate': [0.8, 1.0],
-                                'col_sample_rate': [0.2, 0.5, 1.0]}
-        print(gbm_hyper_parameters)
-        gbm_grid = H2OGridSearch(H2OGradientBoostingEstimator(#custom_metric_func=self.cost_matrix_loss_metric_func,
-                                                              nfolds=3),
-                                 gbm_hyper_parameters,
-                                 search_criteria={'strategy': "RandomDiscrete", 'max_runtime_secs': 120})
-        gbm_grid.train(x=x, y=y, training_frame=train, weights_column="weight", grid_id="gbm_grid")
-
-        best_model = h2o.get_model(sort_models(gbm_grid)[0][1])
-        '''
-        aml = H2OAutoML(max_runtime_secs=5 * 60, seed=1)
-        aml.train(x=x, y=y, training_frame=train, weights_column="weight")
-        best_model = aml.leader
-
-        return best_model
-
     def train_gradientboosting(self, train: h2o.H2OFrame,
                                x: List[str],
                                y: str,
