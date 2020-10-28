@@ -11,7 +11,7 @@ from src.maxmind_ip.plotting import evaluate, print_evaluation
 @function_time
 def main():
     maxmind = MaxmindIp()
-    data = maxmind.train(reset_lookback=False, reset_step=False, sample_size=200000, repetitions=100)
+    data = maxmind.train(reset_lookback=True, reset_step=False, sample_size=None, repetitions=100)
     model = h2o.load_model(maxmind.config['model'])
     print("\n\nSHOWING RETURNED MODEL\n\n")
     print(model)

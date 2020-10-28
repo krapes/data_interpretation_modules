@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 import datetime
 import numpy as np
 import random
+import time
 import logging
 import sys
 import os
@@ -19,9 +20,12 @@ from h2o.utils.distributions import CustomDistributionGaussian
 from h2o.grid.grid_search import H2OGridSearch
 
 
+root = logging.getLogger()
+root.setLevel(logging.INFO)
 logging.basicConfig(level=logging.INFO)
 logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
+
 '''
 import dask
 import dask.dataframe as dd
@@ -98,7 +102,7 @@ class TrainingModel:
     @cutoff.setter
     def cutoff(self, value: int) -> None:
         self._cutoff = value
-        self._data = self.today_result(self._data, cutoff)
+        self._data = self.today_result(self._data, self._cutoff)
 
     @property
     def repetitions(self) -> int:
@@ -123,7 +127,7 @@ class TrainingModel:
     @property
     def best_case_model(self, path: str = None) -> str:
         if self._best_case_model is None:
-            model = self.calibrate_thresholds(self._data)
+            model, threshold = self.calibrate_thresholds(self._data)
             if path is None:
                 path = os.path.join(self.dir_path, 'models/')
             self._best_case_model = h2o.save_model(model, path=path, force=True)
@@ -154,41 +158,46 @@ class TrainingModel:
             for output in outputs:
                 print(output)
             return outputs
-
-        gbm_hyper_parameters = {'learn_rate': [0.01, 0.1]}#,
-                                #'max_depth': [3, 5, 9],
-                                #'sample_rate': [0.8, 1.0],
-                                #'col_sample_rate': [0.2, 0.5, 1.0]}
+        '''
+        gbm_hyper_parameters = {'learn_rate': [0.01, 0.1],
+                                'max_depth': [3, 5, 9],
+                                'sample_rate': [0.8, 1.0],
+                                'col_sample_rate': [0.2, 0.5, 1.0]}
         print(gbm_hyper_parameters)
-        gbm_grid = H2OGridSearch(H2OGradientBoostingEstimator(custom_metric_func=self.cost_matrix_loss_metric_func,
+        gbm_grid = H2OGridSearch(H2OGradientBoostingEstimator(#custom_metric_func=self.cost_matrix_loss_metric_func,
                                                               nfolds=3),
-                                 gbm_hyper_parameters)
+                                 gbm_hyper_parameters,
+                                 search_criteria={'strategy': "RandomDiscrete", 'max_runtime_secs': 120})
         gbm_grid.train(x=x, y=y, training_frame=train, weights_column="weight", grid_id="gbm_grid")
 
         best_model = h2o.get_model(sort_models(gbm_grid)[0][1])
-        #best_model.show()
+        '''
+        aml = H2OAutoML(max_runtime_secs=3600, seed=1)
+        aml.train(x=x, y=y, training_frame=train, weights_column = "weight")
+        best_model = aml.leader
         train_pd = train.as_data_frame()
         train_pd['model_score'] = best_model.predict(test_data=train).as_data_frame()['p1']
         matrix = {'basic': {'x': [], 'y': []}}
+        start_time = time.time()
         for t in range(1, 100):
+            if t % 10 == 0:
+                elapsed_time = time.time() - start_time
+                estimatation_per_loop = elapsed_time / t
+                print(f"Working on {t} of 100. Expected wait time {round(estimatation_per_loop * (100 - t) * 60, 2)}")
             t = t/100
             train_pd['prediction'] = predict(train_pd, t, 1, 'model_score')
             train_pd = reconcile(train_pd, 'prediction', 'fraud', f"CM_{t}")
-            t_cost, train_pd = outcome(train_pd, {'cost_tp': 0, 'cost_fp': 60, 'cost_fn': 2400000, 'cost_tn': -0.1}, f"CM_{t}", f"costs_{t}")
+            t_cost, train_pd = outcome(train_pd, {'cost_tp': 0, 'cost_fp': 60, 'cost_fn': 240, 'cost_tn': -0.1}, f"CM_{t}", f"costs_{t}")
             matrix['basic']['x'].append(t)
             matrix['basic']['y'].append(t_cost)
         title = 'threshold_calculation'
         self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
-        #cost_metric = CostMatrixLossMetric()
-        #train_pd['cost'] = train_pd.apply(lambda row: cost_metric.map([None, None, row.prediction], [row.fraud], row.weight, row.index, row.index)[0], axis=1)
-        print(train_pd[[f"costs_{t}", 'prediction', 'fraud', 'model_score']])
-        print(train_pd.model_score.max(), train_pd.model_score.min())
 
         optimum_threshold = matrix['basic']['x'][matrix['basic']['y'].index(min(matrix['basic']['y']))]
         print(f"optimum_threshold: {optimum_threshold}")
         print(best_model.confusion_matrix(thresholds=optimum_threshold))
 
-        return best_model
+        return best_model, optimum_threshold
 
     def df_to_hf(self, df: pd.DataFrame, cols: list, cat_cols: list):
         cleaned_df = df[cols].dropna()
@@ -209,11 +218,11 @@ class TrainingModel:
         #                                 npartitions=10)
         #thresholds = self.fit_function(ddf)
         train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
-        model = self.train(train,
+        model, threshold = self.train(train,
                             ['corridor', 'risk_score'],
                            'fraud',
                            'weight')
-        return model
+        return model, threshold
 
 
 
@@ -247,16 +256,15 @@ class TrainingModel:
             print(f"Date: {date}       Lookback: {parm['lookback']}   Step: {parm['step']}")
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
-            model = self.calibrate_thresholds(df)
+            model, threshold = self.calibrate_thresholds(df)
 
             today = data[(data['when_created'] >= date)
                          & (data['when_created'] < date + datetime.timedelta(days=parm['step']))].copy()
-            #today = score(today, thresholds, 'risk_score', 'real_result')
             hf_today, df_w_drops = self.df_to_hf(today, ['corridor', 'risk_score', 'fraud'], ['corridor'])
-            predictions = model.predict(test_data=hf_today).as_data_frame()
-            today.loc[df_w_drops.index, 'prediction'] = predictions.predict.to_list()
-            #today['prediction'] = today.prediction.apply(lambda x: 0 if x < 0 else 1)
+            today.loc[df_w_drops.index, 'prediction'] = model.predict(test_data=hf_today).as_data_frame()['p1']
+            today['prediction'] = today.prediction.apply(lambda x: 0 if x < threshold else 1)
             today = reconcile(today, 'prediction', 'fraud', 'real_result')
+
 
             today['weight'] = 1
 
@@ -274,6 +282,11 @@ class TrainingModel:
                     data.loc[g.index, 'thr_top'] = np.nan
                     data.loc[g.index, 'thr_bottom'] = np.nan
             '''
+            # Wipe the cloud with a cluster restart
+            # (the models will no longer be available)
+            h2o.cluster().shutdown()
+            time.sleep(5)
+            h2o.init()
             impacts.append(r)
             dates.append(date)
 
@@ -328,8 +341,10 @@ class TrainingModel:
             step = 14
 
         matrix = {}
+        chosen_corridor = data.corridor.unique()[0]
+        print(f"The chosen corridor is {chosen_corridor}")
         for lookback in [30, 90, 270, 365]:
-            impacts, dates = self.calibration(data, {'lookback': lookback, 'step': step})
+            impacts, dates = self.calibration(data[data['corridor'] == chosen_corridor], {'lookback': lookback, 'step': step})
             matrix[lookback] = {'y': impacts, 'x': dates}
             title = 'Lookback_Results'
             self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
