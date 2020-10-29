@@ -166,12 +166,12 @@ class MaxmindIp:
                                           cost_matrix_loss_metric=cost_matrix_loss_metric,
                                           search_time=search_time)
 
+        if evaluate:
+            self._data = todays_update.evaluate(data)
+
         self.config['model'] = todays_update.best_case_model
         print(todays_update.best_case_model, self.config['model'])
         self._save_config()
-
-        if evaluate:
-            self._data = todays_update.evaluate(data)
 
         return todays_update.data
 
@@ -240,14 +240,17 @@ class MaxmindIp:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
         data = self._data
+        data = data.loc[data.real_result.dropna().index, :]
         t = data[data['today_result'].isin(['tp', 'fp'])].when_created.count()
         r = data[data['real_result'].isin(['tp', 'fp'])].when_created.count()
 
         return t - r
 
-    def _cost_impact(self):
-        r = self._data.real_result_cost.sum()
-        t = self._data.today_result_cost.sum()
+    def cost_impact(self):
+        data = self._data
+        data = data.loc[data.real_result.dropna().index, :]
+        r = data.real_result_cost.sum()
+        t = data.today_result_cost.sum()
         return r - t
 
     def configure_volume_equals_baseline(self,
@@ -267,7 +270,7 @@ class MaxmindIp:
         start_time = time.time()
         step = 2
 
-        while (time.time() - start_time) < search_time:
+        while (time.time() - start_time) < search_time or volume_diff < 500:
 
             step = step if np.sign(volume_diff) == np.sign(last_difference) else step + 1
             if better_vol(volume_diff) is False:
@@ -275,18 +278,20 @@ class MaxmindIp:
                                                    - (self._config['costs']['cost_fn'] / step)
             else:
                 self._config['costs']['cost_fn'] = self._config['costs']['cost_fn'] * (1 + 1 / step)
-            print(f"Using costs {self._config['costs']}")
+            print(f"Using costs {self._config['costs']} \n"
+                  f"Using step: {step}")
+
             data = self.train(reset_lookback=False,
                               reset_step=False,
                               sample_size=None,
                               model_type=model_type,
                               cost_matrix_loss_metric=cost_matrix_loss_metric,
-                              search_time=int(search_time/5),
+                              search_time=60*5,
                               evaluate=True)
             last_difference = volume_diff
             volume_diff = self._volume_difference()
             print(f"vol_diff: The new approach {'saved' if volume_diff > 0 else 'created'} {volume_diff} tickets \n" +
-                  f"cost_diff: The new approach had and impact of {self._cost_impact()} \n" +
+                  f"cost_diff: The new approach had and impact of {self.cost_impact()} \n" +
                   f"cost_saving: {self._data.today_result_cost.sum() - self._data.real_result_cost.sum()}\n")
         return self._config
 
@@ -296,9 +301,10 @@ class MaxmindIp:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
         data = self._data
+        data = data.loc[data.real_result.dropna().index, :]
+
         t = data[data['today_result'].isin(['tp', 'fp'])].when_created.count()
         r = data[data['real_result'].isin(['tp', 'fp'])].when_created.count()
-
         print(f"Total Volume sent to UPS (TP + FP): \n\t Baseline: {t}  New Approach: {r}")
         print(f"The new approach has {'an increase' if r > t else 'a decrease'} of {abs(t - r)} tickets")
         print(f"This represents {'an increase' if r > t else 'a decrease'} of {(t - r) / t * 100} percent")
@@ -308,6 +314,7 @@ class MaxmindIp:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
         data = self._data
+        data = data.loc[data.real_result.dropna().index, :]
 
         t = data[data['today_result'].isin(['tp'])].when_created.count()
         r = data[data['real_result'].isin(['tp'])].when_created.count()
@@ -320,6 +327,7 @@ class MaxmindIp:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
         data = self._data
+        data = data.loc[data.real_result.dropna().index, :]
 
         t = data[data['today_result'].isin(['fp'])].when_created.count()
         r = data[data['real_result'].isin(['fp'])].when_created.count()
