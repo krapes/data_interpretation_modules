@@ -11,6 +11,8 @@ from matplotlib import pyplot as plt
 from .TrainingModel import TrainingModel
 from .utils import predict, avg_value
 
+from typing import Tuple
+
 logger = logging.getLogger(__name__)
 
 
@@ -217,7 +219,7 @@ class MaxmindIp:
         print(f"Impact: {cost_new_approach - cost_baseline}")
         return ax
 
-    def plot_step_lookback_analysis(self):
+    def plot_step_lookback_analysis(self) -> Tuple[plt.Figure, plt.Axes]:
 
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
@@ -234,8 +236,9 @@ class MaxmindIp:
                 sns.lineplot(data=date_agg, x=date_agg.index, y=col, ax=axes[0], label=col)
                 if 'today' not in col:
                     sns.lineplot(data=date_agg, x=date_agg.index, y=f"impact_{col}", ax=axes[1], label=f"impact_{col}")
+        return fig, axes
 
-    def _volume_difference(self):
+    def _volume_difference(self) -> int:
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
@@ -246,7 +249,7 @@ class MaxmindIp:
 
         return t - r
 
-    def cost_impact(self):
+    def cost_impact(self) -> int:
         data = self._data
         data = data.loc[data.real_result.dropna().index, :]
         r = data.real_result_cost.sum()
@@ -254,9 +257,10 @@ class MaxmindIp:
         return r - t
 
     def configure_volume_equals_baseline(self,
-                                         search_time,
+                                         search_time: int,
+                                         sample_size: int = None,
                                          model_type: str = 'AutoML',
-                                         cost_matrix_loss_metric: bool = False):
+                                         cost_matrix_loss_metric: bool = False) -> dict:
         def better_vol(v):
             return True if v > 0 else False
 
@@ -283,7 +287,7 @@ class MaxmindIp:
 
             data = self.train(reset_lookback=False,
                               reset_step=False,
-                              sample_size=None,
+                              sample_size=sample_size,
                               model_type=model_type,
                               cost_matrix_loss_metric=cost_matrix_loss_metric,
                               search_time=60*5,
@@ -295,7 +299,7 @@ class MaxmindIp:
                   f"cost_saving: {self._data.today_result_cost.sum() - self._data.real_result_cost.sum()}\n")
         return self._config
 
-    def stats_volume_vs_baseline(self):
+    def stats_volume_vs_baseline(self) -> None:
 
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
@@ -309,7 +313,7 @@ class MaxmindIp:
         print(f"The new approach has {'an increase' if r > t else 'a decrease'} of {abs(t - r)} tickets")
         print(f"This represents {'an increase' if r > t else 'a decrease'} of {(t - r) / t * 100} percent")
 
-    def stats_tp_vs_baseline(self):
+    def stats_tp_vs_baseline(self) -> None:
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
@@ -322,7 +326,7 @@ class MaxmindIp:
         print(f"The new approach has {'an increase' if r > t else 'a decrease'} of {abs(t - r)} True Positives")
         print(f"This represents change of {(t - r) / t * 100} percent")
 
-    def stats_fp_vs_baseline(self):
+    def stats_fp_vs_baseline(self) -> None:
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
