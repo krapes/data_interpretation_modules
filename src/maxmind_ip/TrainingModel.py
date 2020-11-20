@@ -40,11 +40,17 @@ class TrainingModel:
                  costs: Dict[str, int],
                  lookback: int = None,
                  step: int = None,
-                 cutoff: int = 25) -> None:
+                 cutoff: int = 25,
+                 model_type: str = None,
+                 cost_matrix_loss_metric: bool = False,
+                 search_time: int = None) -> None:
 
         self.costs = costs
         self.inverse_costs = {key: value * -1 for (key, value) in costs.items()}
         self._cutoff = cutoff
+        self.model_type = model_type
+        self.cost_matrix_loss_metric = cost_matrix_loss_metric
+        self.search_time = search_time if search_time is not None else 60*10
         self._data = today_result(data, cutoff)
         self._lookback = (self.calibrate_lookback(self._data, step=step)
                           if lookback is None else lookback)
@@ -180,7 +186,7 @@ class TrainingModel:
 
             return sorted(functioning_list_of_models)
 
-        def grid_train(base_model: H2OGradientBoostingEstimator) -> H2OGridSearch:
+        def grid_train(base_model: H2OGradientBoostingEstimator, search_time: int) -> H2OGridSearch:
             """ Given base model train a search grid to find the optimum hyper parameters
             Args:
                 base_model (H2OGradientBoostingEstimator): model that should be used in hyper parameter search
@@ -194,7 +200,7 @@ class TrainingModel:
             logger.info(f"Searching Hyper Parameter Space:\n {gbm_hyper_parameters}")
             grid = H2OGridSearch(base_model,
                                  gbm_hyper_parameters,
-                                 search_criteria={'strategy': "RandomDiscrete", 'max_runtime_secs': 120})
+                                 search_criteria={'strategy': "RandomDiscrete", 'max_runtime_secs': search_time})
             grid.train(x=x, y=y, training_frame=train, weights_column=weight, grid_id="gbm_grid")
             return grid
 
@@ -225,19 +231,19 @@ class TrainingModel:
                                                                     func_file="cost_matrix_loss_metric.py")
             base_model = H2OGradientBoostingEstimator(custom_metric_func=cost_matrix_loss_metric_func,
                                                       nfolds=3)
-            gbm_grid = grid_train(base_model)
+            gbm_grid = grid_train(base_model, self.search_time)
             # Custom metrics are not available in .get_grid so we must use our own function to select the
             # best model
             best_model = h2o.get_model(sort_models(gbm_grid)[0][1])
         else:
             base_model = H2OGradientBoostingEstimator(nfolds=3)
-            gbm_grid = grid_train(base_model)
+            gbm_grid = grid_train(base_model, self.search_time)
             best_model = gbm_grid.get_grid(sort_by='auc', decreasing=True).models[0]
 
         return best_model
 
-    @staticmethod
-    def train_automl(train: h2o.H2OFrame, x: List[str], y: str, weight: str) -> H2OGenericEstimator:
+
+    def train_automl(self, train: h2o.H2OFrame, x: List[str], y: str, weight: str) -> H2OGenericEstimator:
         """ Use AutoML to build model
 
         Args:
@@ -250,7 +256,7 @@ class TrainingModel:
             H2OGenericEstimator: best model out of the training grid
 
         """
-        aml = H2OAutoML(max_runtime_secs=5 * 60, seed=1)
+        aml = H2OAutoML(max_runtime_secs=self.search_time, seed=1)
         aml.train(x=x, y=y, training_frame=train, weights_column=weight)
         best_model = aml.leader
 
@@ -337,8 +343,8 @@ class TrainingModel:
             # Train model
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
-            model, threshold = self.calibrate_thresholds(df, model_type='GradientBoosting',
-                                                         cost_matrix_loss_metric=True)
+            model, threshold = self.calibrate_thresholds(df, model_type=self.model_type,
+                                                         cost_matrix_loss_metric=self.cost_matrix_loss_metric)
 
             # Take the data one step in the future of the date and evaluate how the model would have done
             today = data[(data['when_created'] >= date)
@@ -371,7 +377,7 @@ class TrainingModel:
         return impacts, dates
 
     @staticmethod
-    def plot(matrix: Dict[str, dict], title: str, save_loc: str, ax: plt.Axes = None) -> plt.Axes:
+    def plot(matrix: dict, title: str, save_loc: str, ax: plt.Axes = None) -> plt.Axes:
         """ Plots the x and y list for every key in matrix dictonary
 
             Args: matrix (dict): a dictionary containing:
@@ -403,6 +409,8 @@ class TrainingModel:
         data['real_result'] = data[f"real_result_{self._lookback}_{self._step}"]
         data['real_result_cost'] = data[f"real_result_cost_{self._lookback}_{self._step}"]
         data['today_result_cost'] = data[f"today_result_cost_{self._lookback}_{self._step}"]
+        self._data = data
+        return data
 
     def calibrate_lookback(self, data: pd.DataFrame, step: int) -> int:
         """ Finds the best performing lookback window (window in time for data is considered
@@ -423,7 +431,7 @@ class TrainingModel:
             impacts, dates = self.calibration(data, {'lookback': lookback, 'step': step})
             matrix[lookback] = {'y': impacts, 'x': dates}
             title = 'Lookback_Results'
-            self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
+            _ = self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
         scores = [(l, sum(matrix[l]['y'])) for l in matrix.keys()]
         scores.sort(key=lambda tup: tup[1], reverse=True)
         return scores[0][0]
