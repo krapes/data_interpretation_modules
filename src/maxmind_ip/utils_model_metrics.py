@@ -10,7 +10,7 @@ class MapeMetric:
 
 class CostMatrixLossMetric:
 
-    cost_dict = {'cost_tp': 0, 'cost_fp': 60, 'cost_tn': -0.1, 'cost_fn': 235}
+    cost_dict = {'cost_tp': 0, 'cost_fp': 60, 'cost_tn': -0.1, 'cost_fn': 125.0}
 
     def map(self, predicted, actual, weight, offset, model):
         cost_tp = self.cost_dict['cost_tp'] # set prior to use

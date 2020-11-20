@@ -257,16 +257,21 @@ class MaxmindIp:
         return r - t
 
     def configure_volume_equals_baseline(self,
-                                         search_time: int,
+                                         search_time: int = -1,
                                          sample_size: int = None,
                                          model_type: str = 'AutoML',
                                          cost_matrix_loss_metric: bool = False) -> dict:
         def better_vol(v):
             return True if v > 0 else False
 
+        def continue_searching(start_time, search_time, volume_diff):
+            if search_time > 0:
+                return (time.time() - start_time) < search_time or volume_diff < 500
+            else:
+                return volume_diff < 500
 
 
-        if search_time < 300:
+        if search_time > 0  and search_time < 300:
             raise Exception("Search time must be greater than 300 seconds")
 
         last_difference = self._volume_difference()
@@ -274,7 +279,7 @@ class MaxmindIp:
         start_time = time.time()
         step = 2
 
-        while (time.time() - start_time) < search_time or volume_diff < 500:
+        while continue_searching(start_time, search_time, volume_diff):
 
             step = step if np.sign(volume_diff) == np.sign(last_difference) else step + 1
             if better_vol(volume_diff) is False:
@@ -294,7 +299,7 @@ class MaxmindIp:
                               evaluate=True)
             last_difference = volume_diff
             volume_diff = self._volume_difference()
-            print(f"vol_diff: The new approach {'saved' if volume_diff > 0 else 'created'} {volume_diff} tickets \n" +
+            print(f"vol_diff: The new approach {'saved' if volume_diff > 0 else 'created'} {abs(volume_diff)} tickets \n" +
                   f"cost_diff: The new approach had and impact of {self.cost_impact()} \n" +
                   f"cost_saving: {self._data.today_result_cost.sum() - self._data.real_result_cost.sum()}\n")
         return self._config
