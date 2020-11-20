@@ -30,7 +30,7 @@ from .utils import outcome, reconcile, today_result, build_weights, cal_impact, 
 
 
 class TrainingModel:
-    h2o.init(ip='34.205.171.33', username='h2o', password='i-05b57cb1cf1f60f4d', port=54321)
+
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
     _best_case_model = None
@@ -43,8 +43,19 @@ class TrainingModel:
                  cutoff: int = 25,
                  model_type: str = None,
                  cost_matrix_loss_metric: bool = False,
-                 search_time: int = None) -> None:
-
+                 search_time: int = None,
+                 ip: str = None,
+                 username: str = None,
+                 password: str = None,
+                 port: int = None) -> None:
+        if ip is not None or username is not None or password is not None or port is not None:
+            if ip is None or username is None or password is None or port is None:
+                raise Exception("If using a remote H2O cluster ALL of following fields must be present"
+                                "  [ip, username, password, port]")
+            else:
+                h2o.init(ip=ip, username=username, password=password, port=port)
+        else:
+            h2o.init()
         self.costs = costs
         self.inverse_costs = {key: value * -1 for (key, value) in costs.items()}
         self._cutoff = cutoff

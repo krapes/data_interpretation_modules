@@ -21,8 +21,16 @@ class MaxmindIp:
     config_location = os.path.join(dir_path, 'config')
     _data = None
 
-    def __init__(self):
+    def __init__(self,
+                 ip: str = None,
+                 username: str = None,
+                 password: str = None,
+                 port: int = None):
         self._config = self._load_config()
+        self.ip = ip
+        self.username = username
+        self.password = password
+        self.port = port
 
     @property
     def config(self):
@@ -121,7 +129,11 @@ class MaxmindIp:
                                           cutoff=cutoff,
                                           model_type=model_type,
                                           cost_matrix_loss_metric=cost_matrix_loss_metric,
-                                          search_time=search_time)
+                                          search_time=search_time,
+                                          ip=self.ip,
+                                          username=self.username,
+                                          password=self.password,
+                                          port=self.port)
 
             self.config['step'] = todays_update.step
             logger.info(f"Lookback length set to {self._config['lookback']}")
@@ -136,7 +148,12 @@ class MaxmindIp:
                                           cutoff=cutoff,
                                           model_type=model_type,
                                           cost_matrix_loss_metric=cost_matrix_loss_metric,
-                                          search_time=search_time)
+                                          search_time=search_time,
+                                          ip=self.ip,
+                                          username=self.username,
+                                          password=self.password,
+                                          port=self.port
+                                          )
             self._config['lookback'] = todays_update.lookback
             logger.info(f"Lookback length set to {self._config['lookback']}")
 
@@ -149,7 +166,12 @@ class MaxmindIp:
                                           cutoff=cutoff,
                                           model_type=model_type,
                                           cost_matrix_loss_metric=cost_matrix_loss_metric,
-                                          search_time=search_time)
+                                          search_time=search_time,
+                                          ip=self.ip,
+                                          username=self.username,
+                                          password=self.password,
+                                          port=self.port
+                                          )
             self.config['step'] = todays_update.step
             logger.info(f"Step length set to {self._config['step']}")
 
@@ -166,7 +188,12 @@ class MaxmindIp:
                                           cutoff=cutoff,
                                           model_type=model_type,
                                           cost_matrix_loss_metric=cost_matrix_loss_metric,
-                                          search_time=search_time)
+                                          search_time=search_time,
+                                          ip=self.ip,
+                                          username=self.username,
+                                          password=self.password,
+                                          port=self.port
+                                          )
 
         if evaluate:
             self._data = todays_update.evaluate(data)
