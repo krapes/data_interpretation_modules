@@ -30,7 +30,7 @@ from .utils import outcome, reconcile, today_result, build_weights, cal_impact, 
 
 
 class TrainingModel:
-    h2o.init()
+    h2o.init(ip='34.205.171.33', username='h2o', password='i-05b57cb1cf1f60f4d', port=54321)
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
     _best_case_model = None
@@ -366,10 +366,14 @@ class TrainingModel:
 
             # Wipe the cloud with a cluster restart
             # (the models, grids, and functions will no longer be available)
-            h2o.cluster().shutdown()
-            time.sleep(5)
-            h2o.init()
-
+            # h2o.cluster().shutdown()
+            # time.sleep(5)
+            # h2o.init(ip='34.236.237.138', username='h2o', password='i-06b4d70af2a7c74e3', port=54321)
+            # h2o.removeAll()
+            # Create frame of objects
+            h_objects = h2o.ls()
+            for key in h_objects['key']:
+                h2o.remove(key)
             # append information gained in this iteration
             impacts.append(r)
             dates.append(date)
