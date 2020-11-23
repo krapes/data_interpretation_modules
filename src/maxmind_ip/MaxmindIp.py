@@ -292,10 +292,15 @@ class MaxmindIp:
             return True if v > 0 else False
 
         def continue_searching(start_time, search_time, volume_diff):
+            print(f"Elasped time: {round((time.time() - start_time) * 60, 2)} min")
             if search_time > 0:
-                return (time.time() - start_time) < search_time or volume_diff < 500
+                return (time.time() - start_time) < search_time and volume_diff > 500
             else:
-                return volume_diff < 500
+                t = 500
+                if volume_diff < t:
+                    print(f"Volume difference less that {t} ... ending search.")
+                    return True
+                return False
 
 
         if search_time > 0  and search_time < 300:
@@ -326,7 +331,8 @@ class MaxmindIp:
                               evaluate=True)
             last_difference = volume_diff
             volume_diff = self._volume_difference()
-            print(f"vol_diff: The new approach {'saved' if volume_diff > 0 else 'created'} {abs(volume_diff)} tickets \n" +
+            print(f"evaluated cost function: {self._config['costs']}\n" +
+                  f"vol_diff: The new approach {'saved' if volume_diff > 0 else 'created'} {abs(volume_diff)} tickets \n" +
                   f"cost_diff: The new approach had and impact of {self.cost_impact()} \n" +
                   f"cost_saving: {self._data.today_result_cost.sum() - self._data.real_result_cost.sum()}\n")
         return self._config

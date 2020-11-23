@@ -185,5 +185,5 @@
   },
   "lookback": 270,
   "step": 90,
-  "model": "/Users/kerrirapes/Documents/Projects/sendwave/analysis/data_interpretation_modules/src/maxmind_ip/models/StackedEnsemble_BestOfFamily_AutoML_20201119_215824"
+  "model": "/Users/kerrirapes/Documents/Projects/sendwave/analysis/data_interpretation_modules/src/maxmind_ip/models/StackedEnsemble_BestOfFamily_AutoML_20201120_171349"
 }
