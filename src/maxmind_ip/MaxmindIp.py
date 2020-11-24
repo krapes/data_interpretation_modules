@@ -293,14 +293,14 @@ class MaxmindIp:
 
         def continue_searching(start_time, search_time, volume_diff):
             print(f"Elasped time: {round((time.time() - start_time) * 60, 2)} min")
+            t = 500
             if search_time > 0:
-                return (time.time() - start_time) < search_time and volume_diff > 500
+                return (time.time() - start_time) < search_time and abs(volume_diff) > t
             else:
-                t = 500
-                if volume_diff < t:
-                    print(f"Volume difference less that {t} ... ending search.")
-                    return True
-                return False
+                if abs(volume_diff) < t:
+                    print(f"Volume difference of {abs(volume_diff)} is less that {t} ... ending search.")
+                    return False
+                return True
 
 
         if search_time > 0  and search_time < 300:
