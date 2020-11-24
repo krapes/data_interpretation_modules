@@ -73,7 +73,7 @@ class MaxmindIp:
 
             Returns: Pandas Dataframe
         """
-
+        # TODO Modify this to collect data from DB (not csv)
         def get_file(filename):
             return os.path.join(self.dir_path, filename)
 
@@ -213,7 +213,7 @@ class MaxmindIp:
 
         Returns int: 0 for not risky behavior 1 for risky behavior
         """
-        # TODO modify inference script
+        # TODO modify inference script to use model (not threshold json)
         corridor = f"{send_country}-{receive_country}"
         thresholds = self.config['thresholds']
         known_corridors = thresholds.keys()
@@ -235,6 +235,14 @@ class MaxmindIp:
         return float(result)
 
     def plot_vs_baseline(self) -> plt.Axes:
+        """
+        Plots the cost of the new approach and the baseline by grp (or groups).
+        Groups are steps taken in the backtesting process. For example, if the step at training
+        was 90 days then grp=1 would be the score after training the first 90 days.
+        After plotting the function prints overall cost metrics.
+
+        Returns: 1 matplotlib axes with the two lines plotted
+        """
         data = self._data
         plt.figure(figsize=(15, 8))
         ax = sns.lineplot(data=data, x='grp', y='real_result_cost', label='real_result_cost')
@@ -247,6 +255,14 @@ class MaxmindIp:
         return ax
 
     def plot_step_lookback_analysis(self) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plots the "impact" results for different 'lookback' trials. Lookback is the amount of historical
+        (measured in days from training date) that the model using in training. Impact is the difference in
+        cost between this trail and the baseline metric.
+        The results are plotted against date.
+
+        Returns: matplotlib figure containing the axes and the axes
+        """
 
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
@@ -266,6 +282,12 @@ class MaxmindIp:
         return fig, axes
 
     def _volume_difference(self) -> int:
+        """
+        Calculates the difference in ticket volume UPS would experience with the new approach verses
+        the baseline approach.
+
+        Returns: int baseline minus new approach
+        """
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
@@ -277,6 +299,11 @@ class MaxmindIp:
         return t - r
 
     def cost_impact(self) -> int:
+        """
+        Calculates the cost difference between the new approach and the baseline approach
+
+        Returns: int new approach minus the baseline approach
+        """
         data = self._data
         data = data.loc[data.real_result.dropna().index, :]
         r = data.real_result_cost.sum()
@@ -288,10 +315,39 @@ class MaxmindIp:
                                          sample_size: int = None,
                                          model_type: str = 'AutoML',
                                          cost_matrix_loss_metric: bool = False) -> dict:
-        def better_vol(v):
+        """
+        Searches for the cost configuration that will give create a UPS ticket volume as close as possible
+        to that of the baseline approach.
+
+        Args:
+            search_time: The max amount of time the method should spend looking for the ideal configuration
+            sample_size: The sample size of the data that should be used, if None all of the data will be used
+            model_type: The model training strategy that will be used in each trial.
+                        (Options at writing ['GradientBoosting', 'AutoMl'])
+            cost_matrix_loss_metric: Whether or not to use a modified loss metric that puts more weight on
+                                     the fn than fp when training.
+
+        """
+        def better_vol(v: int) -> bool:
+            """ Is the UPS volume on this trail better or worse than the baseline?
+            """
             return True if v > 0 else False
 
-        def continue_searching(start_time, search_time, volume_diff):
+        def continue_searching(start_time: float, search_time: float, volume_diff: int) -> bool:
+            """
+            Has the criteria to end the search been met or not. If search_time is greater than zero
+            this indicates that it should be considered in criteria. If search_time is less than
+            zero, this indicates that it should not be considered and that searching should only stop
+            when a configuration is found that creates a volume less than 't' tickets away from the
+            volume created by the baseline.
+
+            Args:
+                start_time: the time when searching started
+                search_time: the max amount of time that should be spent searching
+                volume_diff: the difference in UPS ticket volume between the last trial and the baseline
+
+            Returns: bool Should the method continue searching (True) or exit (False)
+            """
             print(f"Elasped time: {round((time.time() - start_time) * 60, 2)} min")
             t = 500
             if search_time > 0:
@@ -338,6 +394,10 @@ class MaxmindIp:
         return self._config
 
     def stats_volume_vs_baseline(self) -> None:
+        """
+        Non-technical (Human-readable) printout of how the new approach performs from a volume perspective
+        verses the baseline.
+        """
 
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
@@ -352,6 +412,10 @@ class MaxmindIp:
         print(f"This represents {'an increase' if r > t else 'a decrease'} of {(t - r) / t * 100} percent")
 
     def stats_tp_vs_baseline(self) -> None:
+        """
+        Non-technical (Human-readable) printout of how the new approach performs from a True Postive
+        perspective verses the baseline.
+        """
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
@@ -365,6 +429,10 @@ class MaxmindIp:
         print(f"This represents change of {(t - r) / t * 100} percent")
 
     def stats_fp_vs_baseline(self) -> None:
+        """
+        Non-techincal (Human-readable) printout of how the new approach performs from a False Positive
+        perspective verses the baseline.
+        """
         if self._data is None:
             raise Exception("Instance does not contain self._data, run method train with evaluate=True")
 
