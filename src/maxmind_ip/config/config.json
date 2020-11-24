@@ -181,9 +181,9 @@
     "cost_tp": 0,
     "cost_fp": -60,
     "cost_tn": 0.1,
-    "cost_fn": -400.0
+    "cost_fn": -226.26262626262616
   },
   "lookback": 270,
   "step": 90,
-  "model": "/Users/kerrirapes/Documents/Projects/sendwave/analysis/data_interpretation_modules/src/maxmind_ip/models/StackedEnsemble_BestOfFamily_AutoML_20201120_171349"
+  "model": "/Users/kerrirapes/Documents/Projects/sendwave/analysis/data_interpretation_modules/src/maxmind_ip/models/StackedEnsemble_AllModels_AutoML_20201124_103436"
 }
