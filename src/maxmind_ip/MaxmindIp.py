@@ -92,6 +92,8 @@ class MaxmindIp:
             data = data.sample(n=sample_size, random_state=1)
         if date_range:
             data = data[(data['when_created'] > date_range[0]) & (data['when_created'] < date_range[1])]
+        columns = ['when_created', 'risk_score', 'fraud', 'corridor']
+        data = data[columns].dropna()
         print(f"data length: {len(data)}")
         return data
 
@@ -175,6 +177,23 @@ class MaxmindIp:
             self.config['step'] = todays_update.step
             logger.info(f"Step length set to {self._config['step']}")
 
+        elif evaluate:
+            lookback = self._config.get('lookback', None)
+            step = self._config.get('step', None)
+            data = self.load_data(sample_size=sample_size)
+            todays_update = TrainingModel(data,
+                                          self.config['costs'],
+                                          lookback=lookback,
+                                          step=step,
+                                          cutoff=cutoff,
+                                          model_type=model_type,
+                                          cost_matrix_loss_metric=cost_matrix_loss_metric,
+                                          search_time=search_time,
+                                          ip=self.ip,
+                                          username=self.username,
+                                          password=self.password,
+                                          port=self.port
+                                          )
         else:
             lookback = self._config.get('lookback', None)
             step = self._config.get('step', None)
@@ -312,6 +331,7 @@ class MaxmindIp:
 
     def configure_volume_equals_baseline(self,
                                          search_time: int = -1,
+                                         search_volume: int = 2000,
                                          sample_size: int = None,
                                          model_type: str = 'AutoML',
                                          cost_matrix_loss_metric: bool = False) -> dict:
@@ -333,7 +353,7 @@ class MaxmindIp:
             """
             return True if v > 0 else False
 
-        def continue_searching(start_time: float, search_time: float, volume_diff: int) -> bool:
+        def continue_searching(start_time: float, search_time: float, volume_diff: int, search_volume: int) -> bool:
             """
             Has the criteria to end the search been met or not. If search_time is greater than zero
             this indicates that it should be considered in criteria. If search_time is less than
@@ -349,12 +369,11 @@ class MaxmindIp:
             Returns: bool Should the method continue searching (True) or exit (False)
             """
             print(f"Elasped time: {round((time.time() - start_time) * 60, 2)} min")
-            t = 500
             if search_time > 0:
-                return (time.time() - start_time) < search_time and abs(volume_diff) > t
+                return (time.time() - start_time) < search_time and abs(volume_diff) > search_volume
             else:
-                if abs(volume_diff) < t:
-                    print(f"Volume difference of {abs(volume_diff)} is less that {t} ... ending search.")
+                if abs(volume_diff) < search_volume:
+                    print(f"Volume difference of {abs(volume_diff)} is less that {search_volume} ... ending search.")
                     return False
                 return True
 
@@ -367,7 +386,7 @@ class MaxmindIp:
         start_time = time.time()
         step = 2
 
-        while continue_searching(start_time, search_time, volume_diff):
+        while continue_searching(start_time, search_time, volume_diff, search_volume):
 
             step = step if np.sign(volume_diff) == np.sign(last_difference) else step + 1
             if better_vol(volume_diff) is False:

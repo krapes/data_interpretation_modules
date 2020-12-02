@@ -377,11 +377,6 @@ class TrainingModel:
 
             # Wipe the cloud with a cluster restart
             # (the models, grids, and functions will no longer be available)
-            # h2o.cluster().shutdown()
-            # time.sleep(5)
-            # h2o.init(ip='34.236.237.138', username='h2o', password='i-06b4d70af2a7c74e3', port=54321)
-            # h2o.removeAll()
-            # Create frame of objects
             h_objects = h2o.ls()
             for key in h_objects['key']:
                 h2o.remove(key)
