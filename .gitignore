@@ -263,3 +263,6 @@ dmypy.json
 data/
 src/maxmind_ip/data/
 testing/dask-worker-space
+
+src/maxmind_ip/models
+src/maxmind_ip/plots
