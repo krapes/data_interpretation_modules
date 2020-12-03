@@ -2,7 +2,7 @@ import sys
 sys.path.append("..")
 
 from src import MaxmindIp
-from helpers import function_time
+from src.helpers import function_time
 
 import h2o
 
@@ -28,4 +28,4 @@ def main(client):
 
 
 if __name__ == "__main__":
-    main(client)
+    main(client=None)
