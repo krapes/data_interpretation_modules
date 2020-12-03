@@ -423,7 +423,7 @@ class TrainingModel:
     @lookback.setter
     def lookback(self, value: int) -> None:
         self._lookback = value
-        self._data = self.build_weights(self._data, lookback=self._lookback)
+        self._data = build_weights(self._data, lookback=self._lookback)
 
     @property
     def cutoff(self) -> int:
@@ -471,51 +471,6 @@ class TrainingModel:
             print(type(self._best_case_model))
         return self._best_case_model
 
-    '''
-    def calibrate_thresholds(self, df: pd.DataFrame,
-                             model_type: str = 'H2OAutoML',
-                             cost_matrix_loss_metric: bool = False) -> Tuple[H2OGenericEstimator, float]:
-        """ Calculates the best thresholds for each corridor via the fit_function
-
-            Args: df (DataFrame): data containing information necessary for calibration
-                  verbose (bool): if True the function will log progress
-
-            Returns dict: contains the best top and bottom threshold for each corridor
-        """
-        
-        if model_type == 'TopBottomThreshold':
-            ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
-                                             npartitions=10)
-            thresholds = self.fit_function(ddf)
-            return thresholds
-        
-        elif model_type == 'GradientBoosting':
-            self.wipe_h2o_cluster()
-            train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
-            logging.info(f"Training Gradient Boosting {'with' if cost_matrix_loss_metric else 'without'} " +
-                         "cost_matrix_loss_metric")
-            model = self.train_gradientboosting(train,
-                                                ['corridor', 'risk_score'],
-                                                'fraud',
-                                                'weight',
-                                                cost_matrix_loss_metric)
-            threshold = self.optimum_threshold(train, model)
-            print(model.confusion_matrix(thresholds=threshold))
-            
-        elif model_type == 'AutoML':
-            self.wipe_h2o_cluster()
-            train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
-            logging.info("Training AutoML")
-            model = self.train_automl(train,
-                                      ['corridor', 'risk_score'],
-                                      'fraud',
-                                      'weight')
-            threshold = self.optimum_threshold(train, model)
-            print(model.confusion_matrix(thresholds=threshold))
-        
-        else:
-            raise Exception(f"model_type {model_type} not known")
-    '''
 
     def calibration(self, data: pd.DataFrame, parm: Dict[str, int]) -> (list, list):
         """ Simulates time by walking through the data in intervals of
