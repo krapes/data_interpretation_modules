@@ -11,8 +11,9 @@ def main(client):
                          reset_lookback=False,
                          reset_step=False,
                          evaluate=True,
-                         model_type='TopBottomThreshold',
-                         sample_size=200,
+                         model_type='GradientBoosting',
+                         sample_size=200000,
+                         search_time=60*2,
                          repetitions=100)
 
 

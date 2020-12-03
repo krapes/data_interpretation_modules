@@ -100,7 +100,7 @@ class MaxmindIp:
     def train(self,
               reset_lookback: bool = False,
               reset_step: bool = False,
-              sample_size: bool = None,
+              sample_size: int = None,
               evaluate: bool = False,
               model_type: str = None,
               cost_matrix_loss_metric: bool = False,

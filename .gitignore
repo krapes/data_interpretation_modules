@@ -266,3 +266,4 @@ testing/dask-worker-space
 
 src/maxmind_ip/models
 src/maxmind_ip/plots
+/testing/dask-worker-space/

@@ -161,8 +161,8 @@ class H20Model:
         today = reconcile(today, 'prediction', 'fraud', 'real_result')
         return today
 
-    def calibrate_thresholds(self, df: pd.DataFrame, model_type):
-        if model_type == 'GradientBoosting':
+    def calibrate_thresholds(self, df: pd.DataFrame, **kwargs):
+        if self.model_type == 'GradientBoosting':
             self.wipe_h2o_cluster()
             train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
             logging.info(f"Training Gradient Boosting {'with' if self.cost_matrix_loss_metric else 'without'} " +
@@ -177,7 +177,7 @@ class H20Model:
             self.model = model
             self.threshold = threshold
 
-        elif model_type == 'AutoML':
+        elif self.model_type == 'AutoML':
             self.wipe_h2o_cluster()
             train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
             logging.info("Training AutoML")
@@ -191,7 +191,7 @@ class H20Model:
             self.threshold = threshold
 
         else:
-            raise Exception(f"model_type {model_type} not known")
+            raise Exception(f"model_type {self.model_type} not known")
 
     def optimum_threshold(self, hf: h2o.H2OFrame, model: H2OGenericEstimator) -> float:
         """ Selects the best threshold for this model given the cost values of this instance
@@ -464,10 +464,10 @@ class TrainingModel:
         Return:
         """
         if self._best_case_model is None:
-            model, threshold = self.model_shell.calibrate_thresholds(self._data)
+            self.model_shell.calibrate_thresholds(self._data)
             if path is None:
                 path = os.path.join(self.dir_path, 'models/')
-            self._best_case_model = h2o.save_model(model, path=path, force=True)
+            self._best_case_model = h2o.save_model(self.model_shell.model, path=path, force=True)
             print(type(self._best_case_model))
         return self._best_case_model
 
