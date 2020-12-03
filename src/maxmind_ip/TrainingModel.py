@@ -20,7 +20,6 @@ from h2o.grid.grid_search import H2OGridSearch
 from h2o.estimators import H2OGenericEstimator
 import re
 
-
 logging.basicConfig(level=logging.INFO)
 logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
@@ -28,27 +27,36 @@ logger = logging.getLogger(__name__)
 import dask
 import dask.dataframe as dd
 from dask.distributed import Client
-client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
 
+client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
 
 from typing import Dict, TypedDict, Any, Tuple, List
 
 from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact, predict
 
+
 class CorridorThresholds(TypedDict):
     threshold_bottom: float
-    thresold_top: float
+    threshold_top: float
+
 
 class TopBottomThreshold:
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    _repetitions = None
+    costs = None
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         pass
 
     def calibrate_thresholds(self, df: pd.DataFrame, **kwargs):
+        if self._repetitions is None:
+            raise Exception(f"TopBottomThreshold._repetitions cannot be None")
+        if self.costs is None:
+            raise Exception("TopBottomThreshold.costs cannot be None")
+
         ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
                                          npartitions=10)
         self.thresholds = self.fit_function(ddf)
-
 
     def score(self, df: pd.DataFrame):
         df = score(df, self.thresholds, 'risk_score', 'real_result')
@@ -87,6 +95,8 @@ class TopBottomThreshold:
                 return threshold_bottom / 10, threshold_top / 10
 
             best_m = None
+            best_threshold_bottom = None
+            best_threshold_top = None
             corridor = g['corridor'].unique()[0]
             print(f"Starting Corridor {corridor}")
 
@@ -115,13 +125,21 @@ class TopBottomThreshold:
         results = {key: value for key, value in zip(results.index, results)}
         return results
 
-class H20_Model:
+
+class H20Model:
+    threshold = None
+    model = None
+    cost_matrix_loss_metric = None
+    search_time = None
+    model_type = None
+    inverse_costs = None
+    dir_path = os.path.dirname(os.path.realpath(__file__))
 
     def __init__(self,
                  ip: str = None,
                  username: str = None,
                  password: str = None,
-                 port: int = None,):
+                 port: int = None):
 
         if ip is not None or username is not None or password is not None or port is not None:
             if ip is None or username is None or password is None or port is None:
@@ -133,6 +151,10 @@ class H20_Model:
             h2o.init()
 
     def score(self, today: pd.DataFrame):
+        if self.threshold is None:
+            raise Exception(f"self.threshold is {self.threshold}."
+                            "Run the calibrate_thresholds method before running score")
+
         hf_today, df_w_drops = self.df_to_hf(today, ['corridor', 'risk_score', 'fraud'], ['corridor'])
         today.loc[df_w_drops.index, 'prediction'] = self.model.predict(test_data=hf_today).as_data_frame()['p1']
         today['prediction'] = predict(today, self.threshold, 1, 'prediction')
@@ -143,13 +165,13 @@ class H20_Model:
         if model_type == 'GradientBoosting':
             self.wipe_h2o_cluster()
             train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
-            logging.info(f"Training Gradient Boosting {'with' if cost_matrix_loss_metric else 'without'} " +
+            logging.info(f"Training Gradient Boosting {'with' if self.cost_matrix_loss_metric else 'without'} " +
                          "cost_matrix_loss_metric")
             model = self.train_gradientboosting(train,
                                                 ['corridor', 'risk_score'],
                                                 'fraud',
                                                 'weight',
-                                                cost_matrix_loss_metric)
+                                                self.cost_matrix_loss_metric)
             threshold = self.optimum_threshold(train, model)
             print(model.confusion_matrix(thresholds=threshold))
             self.model = model
@@ -194,7 +216,7 @@ class H20_Model:
             t_cost, df = outcome(df, self.inverse_costs, f"CM_{t}", f"costs_{t}")
             matrix[str(model.model_id)]['x'].append(t)
             matrix[str(model.model_id)]['y'].append(t_cost)
-        title = f'threshold_calculation_{model.model_id}'
+        # title = f'threshold_calculation_{model.model_id}'
         # self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
 
         # Return threshold that produced the minimum cost
@@ -298,7 +320,6 @@ class H20_Model:
 
         return best_model
 
-
     def train_automl(self, train: h2o.H2OFrame, x: List[str], y: str, weight: str) -> H2OGenericEstimator:
         """ Use AutoML to build model
 
@@ -373,14 +394,14 @@ class TrainingModel:
             self.model_shell = TopBottomThreshold()
             self.model_shell._repetitions = repetitions
         elif model_type == 'GradientBoosting' or model_type == 'AutoML':
-            self.model_shell = H20_Model(ip=ip,
-                                         username=username,
-                                         password=password,
-                                         port=port)
+            self.model_shell = H20Model(ip=ip,
+                                        username=username,
+                                        password=password,
+                                        port=port)
             self.model_shell.cost_matrix_loss_metric = cost_matrix_loss_metric
-            self.model_shell.search_time = search_time if search_time is not None else 60*10
+            self.model_shell.search_time = search_time if search_time is not None else 60 * 10
             self.model_shell.inverse_costs = {key: value * -1 for (key, value) in costs.items()}
-
+            self.model_shell.model_type = model_type
 
         self._lookback = (self.calibrate_lookback(self._data, step=step)
                           if lookback is None else lookback)
@@ -450,7 +471,6 @@ class TrainingModel:
             print(type(self._best_case_model))
         return self._best_case_model
 
-
     '''
     def calibrate_thresholds(self, df: pd.DataFrame,
                              model_type: str = 'H2OAutoML',
@@ -496,6 +516,7 @@ class TrainingModel:
         else:
             raise Exception(f"model_type {model_type} not known")
     '''
+
     def calibration(self, data: pd.DataFrame, parm: Dict[str, int]) -> (list, list):
         """ Simulates time by walking through the data in intervals of
             'step' and 1) fitting thresholds then 2) testing those thresholds
@@ -519,7 +540,6 @@ class TrainingModel:
         dates = []
         grp = -1
         while date < date_max:
-
             date += datetime.timedelta(days=parm['step'])
             grp += 1
             print(f"Date: {date}       Lookback: {parm['lookback']}   Step: {parm['step']}")
@@ -527,8 +547,7 @@ class TrainingModel:
             # Train model
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
-            self.model_shell.calibrate_thresholds(df, model_type=self.model_type,
-                                                         cost_matrix_loss_metric=self.cost_matrix_loss_metric)
+            self.model_shell.calibrate_thresholds(df)
 
             # Take the data one step in the future of the date and evaluate how the model would have done
             today = data[(data['when_created'] >= date)
