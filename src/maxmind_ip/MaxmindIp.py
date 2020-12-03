@@ -100,11 +100,12 @@ class MaxmindIp:
     def train(self,
               reset_lookback: bool = False,
               reset_step: bool = False,
-              sample_size: bool = None,
+              sample_size: int = None,
               evaluate: bool = False,
               model_type: str = None,
               cost_matrix_loss_metric: bool = False,
-              search_time: int = None
+              search_time: int = None,
+              repetitions: int = None
               ) -> pd.DataFrame:
         """ This function retrains/refits the data and overwrites the config with the results
 
@@ -123,6 +124,10 @@ class MaxmindIp:
             Returns: Pandas Dataframe: training output
 
         """
+        if model_type == None:
+            valid_model_types = ['AutoML', 'Gauss', 'TopBottomThreshold']
+            raise Exception(f"model_type must be one of the following: {valid_model_types}")
+
         cutoff = self._config.get('cutoff', 25)
         if reset_lookback and reset_step:
             data = self.load_data(sample_size=sample_size)
@@ -135,7 +140,8 @@ class MaxmindIp:
                                           ip=self.ip,
                                           username=self.username,
                                           password=self.password,
-                                          port=self.port)
+                                          port=self.port,
+                                          repetitions=repetitions)
 
             self.config['step'] = todays_update.step
             logger.info(f"Lookback length set to {self._config['lookback']}")
@@ -154,7 +160,8 @@ class MaxmindIp:
                                           ip=self.ip,
                                           username=self.username,
                                           password=self.password,
-                                          port=self.port
+                                          port=self.port,
+                                          repetitions=repetitions
                                           )
             self._config['lookback'] = todays_update.lookback
             logger.info(f"Lookback length set to {self._config['lookback']}")
@@ -172,7 +179,8 @@ class MaxmindIp:
                                           ip=self.ip,
                                           username=self.username,
                                           password=self.password,
-                                          port=self.port
+                                          port=self.port,
+                                          repetitions=repetitions
                                           )
             self.config['step'] = todays_update.step
             logger.info(f"Step length set to {self._config['step']}")
@@ -192,7 +200,8 @@ class MaxmindIp:
                                           ip=self.ip,
                                           username=self.username,
                                           password=self.password,
-                                          port=self.port
+                                          port=self.port,
+                                          repetitions=repetitions
                                           )
         else:
             lookback = self._config.get('lookback', None)
@@ -211,19 +220,21 @@ class MaxmindIp:
                                           ip=self.ip,
                                           username=self.username,
                                           password=self.password,
-                                          port=self.port
+                                          port=self.port,
+                                          repetitions=repetitions
                                           )
 
         if evaluate:
             self._data = todays_update.evaluate(data)
 
-        self.config['model'] = todays_update.best_case_model
-        print(todays_update.best_case_model, self.config['model'])
+        if model_type != 'TopBottomThreshold':
+            self.config['model'] = todays_update.best_case_model
+            print(todays_update.best_case_model, self.config['model'])
         self._save_config()
 
         return todays_update.data
 
-    def inference(self, risk_score: int, send_country: str, receive_country: str) -> float:
+    def inference_TopBottomThresholds(self, risk_score: int, send_country: str, receive_country: str) -> float:
         """Evaluates if a given event is risky (positive or 1) or not risky (negative  or 0)
 
         Args: risk_score (int): The risk_score given by the third party Maxmind
@@ -232,7 +243,6 @@ class MaxmindIp:
 
         Returns int: 0 for not risky behavior 1 for risky behavior
         """
-        # TODO modify inference script to use model (not threshold json)
         corridor = f"{send_country}-{receive_country}"
         thresholds = self.config['thresholds']
         known_corridors = thresholds.keys()

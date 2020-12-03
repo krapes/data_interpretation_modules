@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 import datetime
-import time
+import random
 import logging
 import sys
 import os
@@ -18,36 +18,127 @@ from h2o.grid.grid_search import H2OGridSearch
 from h2o.estimators import H2OGenericEstimator
 import re
 
-root = logging.getLogger()
-root.setLevel(logging.INFO)
 logging.basicConfig(level=logging.INFO)
 logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
 
-from typing import Dict, Tuple, List
+import dask
+import dask.dataframe as dd
+from dask.distributed import Client
 
-from .utils import outcome, reconcile, today_result, build_weights, cal_impact, predict
+client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
+
+from typing import Dict, TypedDict, Any, Tuple, List
+
+from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact, predict
 
 
-class TrainingModel:
+class CorridorThresholds(TypedDict):
+    threshold_bottom: float
+    threshold_top: float
 
 
+class TopBottomThreshold:
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    _best_case_model = None
+    _repetitions = None
+    costs = None
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def calibrate_thresholds(self, df: pd.DataFrame, **kwargs):
+        if self._repetitions is None:
+            raise Exception(f"TopBottomThreshold._repetitions cannot be None")
+        if self.costs is None:
+            raise Exception("TopBottomThreshold.costs cannot be None")
+
+        ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
+                                         npartitions=10)
+        self.thresholds = self.fit_function(ddf)
+
+    def score(self, df: pd.DataFrame):
+        df = score(df, self.thresholds, 'risk_score', 'real_result')
+        return df
+
+    def fit_function(self, df: pd.DataFrame) -> Dict[str, CorridorThresholds]:
+        """ This outer function is the setup for the inner spark-pandas_udf fitting
+            function. Here we define the costs dictionary, response schema, and
+            repetition parameter.
+
+            Args: df (Spark DataFrame): Contains data entries with risk_score, corridor,
+                                        weight and fraud
+
+            Returns: DataFrame: Contains fitted thresholds for each corridor
+        """
+        costs = self.costs
+        repetitions = self._repetitions
+
+        def fit(g: dask.dataframe) -> Dict[str, float]:
+            """ Finds the best scoring top and bottom threshold combinations for
+                data in dataframe g.
+
+                Args: g (Spark DataFrame of one grouped_map): Entries for fitting
+
+                Returns: (pandas DataFrame): one line dataframe containing fit results
+            """
+
+            def get_thresholds() -> (float, float):
+                """ Generates top and bottom threshold guesses. Top must be
+                    larger than bottom.
+
+                    Returns: int, int: threshold_bottom, threshold_top
+                """
+                threshold_bottom = random.randrange(1, 850, 1)
+                threshold_top = random.randrange(threshold_bottom, 1000, 1)
+                return threshold_bottom / 10, threshold_top / 10
+
+            best_m = None
+            best_threshold_bottom = None
+            best_threshold_top = None
+            corridor = g['corridor'].unique()[0]
+            print(f"Starting Corridor {corridor}")
+
+            # Thresholds are randomly tried for number 'repetitions' times
+            for _ in range(1, repetitions):
+                threshold_bottom, threshold_top = get_thresholds()
+
+                g = score(g,
+                          {corridor: {"threshold_top": threshold_top,
+                                      "threshold_bottom": threshold_bottom}},
+                          'risk_score',
+                          'result')
+
+                m_effect, _ = outcome(g, costs, 'result')
+
+                # The most effective combination is saved
+                if best_m is None or m_effect > best_m:
+                    best_threshold_bottom = threshold_bottom
+                    best_threshold_top = threshold_top
+                    best_m = m_effect
+
+            return {"threshold_top": best_threshold_top,
+                    "threshold_bottom": best_threshold_bottom}
+
+        results = df.groupby('corridor').apply(fit, meta=object).compute().sort_index()
+        results = {key: value for key, value in zip(results.index, results)}
+        return results
+
+
+class H20Model:
+    threshold = None
+    model = None
+    cost_matrix_loss_metric = None
+    search_time = None
+    model_type = None
+    inverse_costs = None
+    dir_path = os.path.dirname(os.path.realpath(__file__))
 
     def __init__(self,
-                 data: pd.DataFrame,
-                 costs: Dict[str, int],
-                 lookback: int = None,
-                 step: int = None,
-                 cutoff: int = 25,
-                 model_type: str = None,
-                 cost_matrix_loss_metric: bool = False,
-                 search_time: int = None,
                  ip: str = None,
                  username: str = None,
                  password: str = None,
-                 port: int = None) -> None:
+                 port: int = None):
+
         if ip is not None or username is not None or password is not None or port is not None:
             if ip is None or username is None or password is None or port is None:
                 raise Exception("If using a remote H2O cluster ALL of following fields must be present"
@@ -56,76 +147,49 @@ class TrainingModel:
                 h2o.init(ip=ip, username=username, password=password, port=port)
         else:
             h2o.init()
-        self.costs = costs
-        self.inverse_costs = {key: value * -1 for (key, value) in costs.items()}
-        self._cutoff = cutoff
-        self.model_type = model_type
-        self.cost_matrix_loss_metric = cost_matrix_loss_metric
-        self.search_time = search_time if search_time is not None else 60*10
-        self._data = today_result(data, cutoff)
-        self._lookback = (self.calibrate_lookback(self._data, step=step)
-                          if lookback is None else lookback)
-        self._step = (self.calibrate_step(self.data, self.lookback)
-                      if step is None else step)
-        self._data = build_weights(self._data, lookback=self._lookback)
 
-    @property
-    def lookback(self) -> int:
-        """ The number of days (or 'time_delta' units) that should be considered when
-            fitting the data
-        """
-        return self._lookback
+    def score(self, today: pd.DataFrame):
+        if self.threshold is None:
+            raise Exception(f"self.threshold is {self.threshold}."
+                            "Run the calibrate_thresholds method before running score")
 
-    @lookback.setter
-    def lookback(self, value: int) -> None:
-        self._lookback = value
-        self._data = self.build_weights(self._data, lookback=self._lookback)
+        hf_today, df_w_drops = self.df_to_hf(today, ['corridor', 'risk_score', 'fraud'], ['corridor'])
+        today.loc[df_w_drops.index, 'prediction'] = self.model.predict(test_data=hf_today).as_data_frame()['p1']
+        today['prediction'] = predict(today, self.threshold, 1, 'prediction')
+        today = reconcile(today, 'prediction', 'fraud', 'real_result')
+        return today
 
-    @property
-    def cutoff(self) -> int:
-        """ The threshold value used in the baseline ("today") approach
-        """
-        return self._cutoff
+    def calibrate_thresholds(self, df: pd.DataFrame, **kwargs):
+        if self.model_type == 'GradientBoosting':
+            self.wipe_h2o_cluster()
+            train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
+            logging.info(f"Training Gradient Boosting {'with' if self.cost_matrix_loss_metric else 'without'} " +
+                         "cost_matrix_loss_metric")
+            model = self.train_gradientboosting(train,
+                                                ['corridor', 'risk_score'],
+                                                'fraud',
+                                                'weight',
+                                                self.cost_matrix_loss_metric)
+            threshold = self.optimum_threshold(train, model)
+            print(model.confusion_matrix(thresholds=threshold))
+            self.model = model
+            self.threshold = threshold
 
-    @cutoff.setter
-    def cutoff(self, value: int) -> None:
-        self._cutoff = value
-        self._data = self.today_result(self._data, self._cutoff)
+        elif self.model_type == 'AutoML':
+            self.wipe_h2o_cluster()
+            train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
+            logging.info("Training AutoML")
+            model = self.train_automl(train,
+                                      ['corridor', 'risk_score'],
+                                      'fraud',
+                                      'weight')
+            threshold = self.optimum_threshold(train, model)
+            print(model.confusion_matrix(thresholds=threshold))
+            self.model = model
+            self.threshold = threshold
 
-    @property
-    def repetitions(self) -> int:
-        """ The number of threshold guesses that should be tried when fitting
-        """
-        return self._repetitions
-
-    @repetitions.setter
-    def repetitions(self, value: int) -> None:
-        self._repetitions = value
-
-    @property
-    def data(self) -> pd.DataFrame:
-        """ Pandas DataFrame containing necessary data"""
-        return self._data
-
-    @property
-    def step(self) -> int:
-        """ The number of days between each refitting """
-        return self._step
-
-    @property
-    def best_case_model(self, path: str = None) -> str:
-        """ The best model that can be produced for future predictions
-        Args:
-            path (str): Optional location of saved model
-        Return:
-        """
-        if self._best_case_model is None:
-            model, threshold = self.calibrate_thresholds(self._data)
-            if path is None:
-                path = os.path.join(self.dir_path, 'models/')
-            self._best_case_model = h2o.save_model(model, path=path, force=True)
-            print(type(self._best_case_model))
-        return self._best_case_model
+        else:
+            raise Exception(f"model_type {self.model_type} not known")
 
     def optimum_threshold(self, hf: h2o.H2OFrame, model: H2OGenericEstimator) -> float:
         """ Selects the best threshold for this model given the cost values of this instance
@@ -150,8 +214,8 @@ class TrainingModel:
             t_cost, df = outcome(df, self.inverse_costs, f"CM_{t}", f"costs_{t}")
             matrix[str(model.model_id)]['x'].append(t)
             matrix[str(model.model_id)]['y'].append(t_cost)
-        title = f'threshold_calculation_{model.model_id}'
-        self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
+        # title = f'threshold_calculation_{model.model_id}'
+        # self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
 
         # Return threshold that produced the minimum cost
         idx_min_cost = matrix[str(model.model_id)]['y'].index(min(matrix[str(model.model_id)]['y']))
@@ -188,7 +252,8 @@ class TrainingModel:
             functioning_list_of_models = []
             for model_name in grid.model_ids:
                 try:
-                    result = [h2o.get_model(model_name).model_performance(xval=True).custom_metric_value(), model_name]
+                    result = [h2o.get_model(model_name).model_performance(xval=True).custom_metric_value(),
+                              model_name]
                     functioning_list_of_models.append(result)
                 except AttributeError:
                     # Some models fail because they don't have a custom_metric_value, it's unclear why at this time
@@ -253,7 +318,6 @@ class TrainingModel:
 
         return best_model
 
-
     def train_automl(self, train: h2o.H2OFrame, x: List[str], y: str, weight: str) -> H2OGenericEstimator:
         """ Use AutoML to build model
 
@@ -291,38 +355,120 @@ class TrainingModel:
             hf[col] = hf[col].asfactor()
         return hf, cleaned_df
 
-    def calibrate_thresholds(self, df: pd.DataFrame,
-                             model_type: str = 'H2OAutoML',
-                             cost_matrix_loss_metric: bool = False) -> Tuple[H2OGenericEstimator, float]:
-        """ Calculates the best thresholds for each corridor via the fit_function
+    def wipe_h2o_cluster(self):
+        # Wipe the cloud with a cluster restart
+        # (the models, grids, and functions will no longer be available)
+        h_objects = h2o.ls()
+        for key in h_objects['key']:
+            h2o.remove(key)
+        # append information gained in this iteration
 
-            Args: df (DataFrame): data containing information necessary for calibration
-                  model_type (str): the type of model or strategy that should be used
-                  cost_matrix_loss_metric (bool): if true, training and model selection will be performed with
-                                                    the CostMatrixLossMetric class
 
-            Returns H2OModel, float: trained model and it corresponding threshold
+class TrainingModel:
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    _best_case_model = None
+
+    def __init__(self,
+                 data: pd.DataFrame,
+                 costs: Dict[str, int],
+                 lookback: int = None,
+                 step: int = None,
+                 cutoff: int = 25,
+                 model_type: str = None,
+                 cost_matrix_loss_metric: bool = False,
+                 search_time: int = None,
+                 ip: str = None,
+                 username: str = None,
+                 password: str = None,
+                 port: int = None,
+                 repetitions: int = 700) -> None:
+
+        self.costs = costs
+
+        self._cutoff = cutoff
+        self._data = today_result(data, cutoff)
+        self.model_type = model_type
+        if model_type == 'TopBottomThreshold':
+            self.model_shell = TopBottomThreshold()
+            self.model_shell._repetitions = repetitions
+        elif model_type == 'GradientBoosting' or model_type == 'AutoML':
+            self.model_shell = H20Model(ip=ip,
+                                        username=username,
+                                        password=password,
+                                        port=port)
+            self.model_shell.cost_matrix_loss_metric = cost_matrix_loss_metric
+            self.model_shell.search_time = search_time if search_time is not None else 60 * 10
+            self.model_shell.inverse_costs = {key: value * -1 for (key, value) in costs.items()}
+            self.model_shell.model_type = model_type
+
+        self._lookback = (self.calibrate_lookback(self._data, step=step)
+                          if lookback is None else lookback)
+        self._step = (self.calibrate_step(self.data, self.lookback)
+                      if step is None else step)
+        self._data = build_weights(self._data, lookback=self._lookback)
+        self.model_shell._lookback = self._lookback
+        self.model_shell._step = self._step
+        self.model_shell.costs = self.costs
+        self.model_shell._data = self._data
+
+    @property
+    def lookback(self) -> int:
+        """ The number of days (or 'time_delta' units) that should be considered when
+            fitting the data
         """
+        return self._lookback
 
-        train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
-        if model_type == 'GradientBoosting':
-            logging.info(f"Training Gradient Boosting {'with' if cost_matrix_loss_metric else 'without'} " +
-                         "cost_matrix_loss_metric")
-            model = self.train_gradientboosting(train,
-                                                ['corridor', 'risk_score'],
-                                                'fraud',
-                                                'weight',
-                                                cost_matrix_loss_metric)
-        else:
-            logging.info("Training AutoML")
-            model = self.train_automl(train,
-                                      ['corridor', 'risk_score'],
-                                      'fraud',
-                                      'weight')
+    @lookback.setter
+    def lookback(self, value: int) -> None:
+        self._lookback = value
+        self._data = build_weights(self._data, lookback=self._lookback)
 
-        threshold = self.optimum_threshold(train, model)
-        print(model.confusion_matrix(thresholds=threshold))
-        return model, threshold
+    @property
+    def cutoff(self) -> int:
+        """ The threshold value used in the baseline ("today") approach
+        """
+        return self._cutoff
+
+    @cutoff.setter
+    def cutoff(self, value: int) -> None:
+        self._cutoff = value
+        self._data = self.today_result(self._data, self._cutoff)
+
+    @property
+    def repetitions(self) -> int:
+        """ The number of threshold guesses that should be tried when fitting
+        """
+        return self._repetitions
+
+    @repetitions.setter
+    def repetitions(self, value: int) -> None:
+        self._repetitions = value
+
+    @property
+    def data(self) -> pd.DataFrame:
+        """ Pandas DataFrame containing necessary data"""
+        return self._data
+
+    @property
+    def step(self) -> int:
+        """ The number of days between each refitting """
+        return self._step
+
+    @property
+    def best_case_model(self, path: str = None) -> str:
+        """ The best model that can be produced for future predictions
+        Args:
+            path (str): Optional location of saved model
+        Return:
+        """
+        if self._best_case_model is None:
+            self.model_shell.calibrate_thresholds(self._data)
+            if path is None:
+                path = os.path.join(self.dir_path, 'models/')
+            self._best_case_model = h2o.save_model(self.model_shell.model, path=path, force=True)
+            print(type(self._best_case_model))
+        return self._best_case_model
+
 
     def calibration(self, data: pd.DataFrame, parm: Dict[str, int]) -> (list, list):
         """ Simulates time by walking through the data in intervals of
@@ -354,18 +500,12 @@ class TrainingModel:
             # Train model
             df = build_weights(data[data['when_created'] < date].copy(), lookback=parm['lookback'])
             df = df[df['weight'] != 0]
-            model, threshold = self.calibrate_thresholds(df, model_type=self.model_type,
-                                                         cost_matrix_loss_metric=self.cost_matrix_loss_metric)
+            self.model_shell.calibrate_thresholds(df)
 
             # Take the data one step in the future of the date and evaluate how the model would have done
             today = data[(data['when_created'] >= date)
                          & (data['when_created'] < date + datetime.timedelta(days=parm['step']))].copy()
-            hf_today, df_w_drops = self.df_to_hf(today, ['corridor', 'risk_score', 'fraud'], ['corridor'])
-            today.loc[df_w_drops.index, 'prediction'] = model.predict(test_data=hf_today).as_data_frame()['p1']
-            today['prediction'] = predict(today, threshold, 1, 'prediction')
-            today = reconcile(today, 'prediction', 'fraud', 'real_result')
-
-            # All data is of the same importance when testing
+            today = self.model_shell.score(today)
             today['weight'] = 1
 
             # Calculate the monetary impact of the model verse the the baseline
@@ -375,12 +515,6 @@ class TrainingModel:
             data.loc[today.index, f"today_result_cost_{parm['lookback']}_{parm['step']}"] = today['today_result_cost']
             data.loc[today.index, 'grp'] = grp
 
-            # Wipe the cloud with a cluster restart
-            # (the models, grids, and functions will no longer be available)
-            h_objects = h2o.ls()
-            for key in h_objects['key']:
-                h2o.remove(key)
-            # append information gained in this iteration
             impacts.append(r)
             dates.append(date)
 
