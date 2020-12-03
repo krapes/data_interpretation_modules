@@ -7,8 +7,6 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 import datetime
-import numpy as np
-import time
 import random
 import logging
 import sys
