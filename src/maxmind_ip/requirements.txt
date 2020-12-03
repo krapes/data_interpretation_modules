@@ -2,4 +2,3 @@ seaborn
 pandas
 numpy
 matplotlib
-pyspark
