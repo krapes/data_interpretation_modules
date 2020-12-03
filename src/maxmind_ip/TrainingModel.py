@@ -464,7 +464,7 @@ class TrainingModel:
         Return:
         """
         if self._best_case_model is None:
-            model, threshold = self.calibrate_thresholds(self._data)
+            model, threshold = self.model_shell.calibrate_thresholds(self._data)
             if path is None:
                 path = os.path.join(self.dir_path, 'models/')
             self._best_case_model = h2o.save_model(model, path=path, force=True)

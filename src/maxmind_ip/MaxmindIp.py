@@ -125,7 +125,7 @@ class MaxmindIp:
 
         """
         if model_type == None:
-            valid_model_types = ['AutoML', 'Gauss', 'TopBottomThresholds']
+            valid_model_types = ['AutoML', 'Gauss', 'TopBottomThreshold']
             raise Exception(f"model_type must be one of the following: {valid_model_types}")
 
         cutoff = self._config.get('cutoff', 25)
@@ -227,7 +227,7 @@ class MaxmindIp:
         if evaluate:
             self._data = todays_update.evaluate(data)
 
-        if model_type != 'TopBottomThresholds':
+        if model_type != 'TopBottomThreshold':
             self.config['model'] = todays_update.best_case_model
             print(todays_update.best_case_model, self.config['model'])
         self._save_config()
