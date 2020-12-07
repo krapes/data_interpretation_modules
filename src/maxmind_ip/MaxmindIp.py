@@ -344,6 +344,7 @@ class MaxmindIp:
                                          search_volume: int = 2000,
                                          sample_size: int = None,
                                          model_type: str = 'AutoML',
+                                         repetitions: int = 300,
                                          cost_matrix_loss_metric: bool = False) -> dict:
         """
         Searches for the cost configuration that will give create a UPS ticket volume as close as possible
@@ -413,6 +414,7 @@ class MaxmindIp:
                               model_type=model_type,
                               cost_matrix_loss_metric=cost_matrix_loss_metric,
                               search_time=60*5,
+                              repetitions=repetitions,
                               evaluate=True)
             last_difference = volume_diff
             volume_diff = self._volume_difference()

@@ -18,6 +18,8 @@ from h2o.grid.grid_search import H2OGridSearch
 from h2o.estimators import H2OGenericEstimator
 import re
 
+pd.options.mode.chained_assignment = None
+
 logging.basicConfig(level=logging.INFO)
 logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ import dask
 import dask.dataframe as dd
 from dask.distributed import Client
 
-client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='5GB')
+client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='8GB')
 
 from typing import Dict, TypedDict, Any, Tuple, List
 
