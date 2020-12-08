@@ -23,13 +23,13 @@ pd.options.mode.chained_assignment = None
 logging.basicConfig(level=logging.INFO)
 logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
-
+'''
 import dask
 import dask.dataframe as dd
 from dask.distributed import Client
 
 client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='8GB')
-
+'''
 from typing import Dict, TypedDict, Any, Tuple, List
 
 from .utils import score, outcome, reconcile, today_result, build_weights, cal_impact, predict
@@ -54,9 +54,12 @@ class TopBottomThreshold:
         if self.costs is None:
             raise Exception("TopBottomThreshold.costs cannot be None")
 
+        data = df[['corridor', 'risk_score', 'fraud', 'weight']].dropna()
+        '''
         ddf = dask.dataframe.from_pandas(df[['corridor', 'risk_score', 'fraud', 'weight']].dropna(),
                                          npartitions=10)
         self.thresholds = self.fit_function(ddf)
+        '''
 
     def score(self, df: pd.DataFrame):
         df = score(df, self.thresholds, 'risk_score', 'real_result')
@@ -75,7 +78,7 @@ class TopBottomThreshold:
         costs = self.costs
         repetitions = self._repetitions
 
-        def fit(g: dask.dataframe) -> Dict[str, float]:
+        def fit(g: pd.dataframe) -> Dict[str, float]:
             """ Finds the best scoring top and bottom threshold combinations for
                 data in dataframe g.
 
@@ -121,7 +124,9 @@ class TopBottomThreshold:
             return {"threshold_top": best_threshold_top,
                     "threshold_bottom": best_threshold_bottom}
 
-        results = df.groupby('corridor').apply(fit, meta=object).compute().sort_index()
+
+        # results = df.groupby('corridor').apply(fit, meta=object).compute().sort_index()
+        results = df.groupby('corridor').apply(fit)
         results = {key: value for key, value in zip(results.index, results)}
         return results
 
