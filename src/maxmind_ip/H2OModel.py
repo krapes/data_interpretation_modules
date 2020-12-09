@@ -254,6 +254,10 @@ class H20Model:
         # Wipe the cloud with a cluster restart
         # (the models, grids, and functions will no longer be available)
         h_objects = h2o.ls()
+        logging.info(h_objects)
         for key in h_objects['key']:
-            h2o.remove(key)
+            try:
+                h2o.remove(key)
+            except:
+                logging.info(f"Error while attempting to remove {key}")
         # append information gained in this iteration

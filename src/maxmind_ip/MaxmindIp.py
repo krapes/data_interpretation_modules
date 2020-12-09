@@ -26,7 +26,7 @@ class MaxmindIp:
                  username: str = None,
                  password: str = None,
                  port: int = None):
-        self._config = self._load_config()
+        self.config = self._load_config()
         self.ip = ip
         self.username = username
         self.password = password
