@@ -45,7 +45,7 @@ class TrainingModel:
         self.costs = costs
 
         self._cutoff = cutoff
-        self._data = today_result(data, cutoff)
+        self.data = today_result(data, cutoff)
         self.model_type = model_type
         if model_type == 'TopBottomThreshold':
             self.model_shell = TopBottomThreshold()
@@ -60,15 +60,15 @@ class TrainingModel:
             self.model_shell.inverse_costs = {key: value * -1 for (key, value) in costs.items()}
             self.model_shell.model_type = model_type
 
-        self._lookback = (self.calibrate_lookback(self._data, step=step)
+        self._lookback = (self.calibrate_lookback(self.data, step=step)
                           if lookback is None else lookback)
-        self._step = (self.calibrate_step(self.data, self.lookback)
+        self.step = (self.calibrate_step(self.data, self.lookback)
                       if step is None else step)
-        self._data = build_weights(self._data, lookback=self._lookback)
+        self.data = build_weights(self.data, lookback=self._lookback)
         self.model_shell._lookback = self._lookback
-        self.model_shell._step = self._step
+        self.model_shell._step = self.step
         self.model_shell.costs = self.costs
-        self.model_shell._data = self._data
+        self.model_shell._data = self.data
 
     @property
     def lookback(self) -> int:
@@ -80,7 +80,7 @@ class TrainingModel:
     @lookback.setter
     def lookback(self, value: int) -> None:
         self._lookback = value
-        self._data = build_weights(self._data, lookback=self._lookback)
+        self.data = build_weights(self.data, lookback=self._lookback)
 
     @property
     def cutoff(self) -> int:
@@ -91,27 +91,7 @@ class TrainingModel:
     @cutoff.setter
     def cutoff(self, value: int) -> None:
         self._cutoff = value
-        self._data = self.today_result(self._data, self._cutoff)
-
-    @property
-    def repetitions(self) -> int:
-        """ The number of threshold guesses that should be tried when fitting
-        """
-        return self._repetitions
-
-    @repetitions.setter
-    def repetitions(self, value: int) -> None:
-        self._repetitions = value
-
-    @property
-    def data(self) -> pd.DataFrame:
-        """ Pandas DataFrame containing necessary data"""
-        return self._data
-
-    @property
-    def step(self) -> int:
-        """ The number of days between each refitting """
-        return self._step
+        self.data = self.today_result(self.data, self._cutoff)
 
     @property
     def best_case_model(self, path: str = None) -> str:
@@ -121,7 +101,7 @@ class TrainingModel:
         Return:
         """
         if self._best_case_model is None:
-            self.model_shell.calibrate_thresholds(self._data)
+            self.model_shell.calibrate_thresholds(self.data)
             if path is None:
                 path = os.path.join(self.dir_path, 'models/')
             self._best_case_model = h2o.save_model(self.model_shell.model, path=path, force=True)
@@ -208,11 +188,11 @@ class TrainingModel:
     def evaluate(self, data: pd.DataFrame) -> None:
         """ Runs one calibration loop with the instance lookback and step values
         """
-        self.calibration(data, {'lookback': self._lookback, 'step': self._step})
-        data['real_result'] = data[f"real_result_{self._lookback}_{self._step}"]
-        data['real_result_cost'] = data[f"real_result_cost_{self._lookback}_{self._step}"]
-        data['today_result_cost'] = data[f"today_result_cost_{self._lookback}_{self._step}"]
-        self._data = data
+        self.calibration(data, {'lookback': self._lookback, 'step': self.step})
+        data['real_result'] = data[f"real_result_{self._lookback}_{self.step}"]
+        data['real_result_cost'] = data[f"real_result_cost_{self._lookback}_{self.step}"]
+        data['today_result_cost'] = data[f"today_result_cost_{self._lookback}_{self.step}"]
+        self.data = data
         return data
 
     def calibrate_lookback(self, data: pd.DataFrame, step: int) -> int:
