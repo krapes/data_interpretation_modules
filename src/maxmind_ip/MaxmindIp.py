@@ -26,21 +26,12 @@ class MaxmindIp:
                  username: str = None,
                  password: str = None,
                  port: int = None):
-        self._config = self._load_config()
+        self.config = self._load_config()
         self.ip = ip
         self.username = username
         self.password = password
         self.port = port
 
-    @property
-    def config(self):
-        """Dictionary containing configuration information like costs, lookback, step,
-            cutoff for the instance"""
-        return self._config
-
-    @config.setter
-    def config(self, value):
-        self._config = value
 
     @staticmethod
     def _load_config(folder: str = config_location) -> dict:
@@ -128,11 +119,11 @@ class MaxmindIp:
             valid_model_types = ['AutoML', 'Gauss', 'TopBottomThreshold']
             raise Exception(f"model_type must be one of the following: {valid_model_types}")
 
-        cutoff = self._config.get('cutoff', 25)
+        cutoff = self.config.get('cutoff', 25)
         if reset_lookback and reset_step:
             data = self.load_data(sample_size=sample_size)
             todays_update = TrainingModel(data,
-                                          self._config['costs'],
+                                          self.config['costs'],
                                           cutoff=cutoff,
                                           model_type=model_type,
                                           cost_matrix_loss_metric=cost_matrix_loss_metric,
@@ -144,14 +135,14 @@ class MaxmindIp:
                                           repetitions=repetitions)
 
             self.config['step'] = todays_update.step
-            logger.info(f"Lookback length set to {self._config['lookback']}")
-            logger.info(f"Step length set to {self._config['step']}")
+            logger.info(f"Lookback length set to {self.config['lookback']}")
+            logger.info(f"Step length set to {self.config['step']}")
 
         elif reset_lookback:
             data = self.load_data(sample_size=sample_size)
-            step = self._config.get('step', 14)
+            step = self.config.get('step', 14)
             todays_update = TrainingModel(data,
-                                          self._config['costs'],
+                                          self.config['costs'],
                                           step=step,
                                           cutoff=cutoff,
                                           model_type=model_type,
@@ -163,14 +154,14 @@ class MaxmindIp:
                                           port=self.port,
                                           repetitions=repetitions
                                           )
-            self._config['lookback'] = todays_update.lookback
-            logger.info(f"Lookback length set to {self._config['lookback']}")
+            self.config['lookback'] = todays_update.lookback
+            logger.info(f"Lookback length set to {self.config['lookback']}")
 
         elif reset_step:
             data = self.load_data(sample_size=sample_size)
             lookback = self.config.get('lookback', 90)
             todays_update = TrainingModel(data,
-                                          self._config['costs'],
+                                          self.config['costs'],
                                           lookback=lookback,
                                           cutoff=cutoff,
                                           model_type=model_type,
@@ -183,11 +174,11 @@ class MaxmindIp:
                                           repetitions=repetitions
                                           )
             self.config['step'] = todays_update.step
-            logger.info(f"Step length set to {self._config['step']}")
+            logger.info(f"Step length set to {self.config['step']}")
 
         elif evaluate:
-            lookback = self._config.get('lookback', None)
-            step = self._config.get('step', None)
+            lookback = self.config.get('lookback', None)
+            step = self.config.get('step', None)
             data = self.load_data(sample_size=sample_size)
             todays_update = TrainingModel(data,
                                           self.config['costs'],
@@ -204,8 +195,8 @@ class MaxmindIp:
                                           repetitions=repetitions
                                           )
         else:
-            lookback = self._config.get('lookback', None)
-            step = self._config.get('step', None)
+            lookback = self.config.get('lookback', None)
+            step = self.config.get('step', None)
             start = datetime.datetime.now() - datetime.timedelta(days=lookback)
             end = datetime.datetime.now()
             data = self.load_data(date_range=(start, end), sample_size=sample_size)
@@ -401,11 +392,11 @@ class MaxmindIp:
 
             step = step if np.sign(volume_diff) == np.sign(last_difference) else step + 1
             if better_vol(volume_diff) is False:
-                self._config['costs']['cost_fn'] = self._config['costs']['cost_fn'] \
-                                                   - (self._config['costs']['cost_fn'] / step)
+                self.config['costs']['cost_fn'] = self.config['costs']['cost_fn'] \
+                                                   - (self.config['costs']['cost_fn'] / step)
             else:
-                self._config['costs']['cost_fn'] = self._config['costs']['cost_fn'] * (1 + 1 / step)
-            print(f"Using costs {self._config['costs']} \n"
+                self.config['costs']['cost_fn'] = self.config['costs']['cost_fn'] * (1 + 1 / step)
+            print(f"Using costs {self.config['costs']} \n"
                   f"Using step: {step}")
 
             data = self.train(reset_lookback=False,
@@ -418,11 +409,11 @@ class MaxmindIp:
                               evaluate=True)
             last_difference = volume_diff
             volume_diff = self._volume_difference()
-            print(f"evaluated cost function: {self._config['costs']}\n" +
+            print(f"evaluated cost function: {self.config['costs']}\n" +
                   f"vol_diff: The new approach {'saved' if volume_diff > 0 else 'created'} {abs(volume_diff)} tickets \n" +
                   f"cost_diff: The new approach had and impact of {self.cost_impact()} \n" +
                   f"cost_saving: {self._data.today_result_cost.sum() - self._data.real_result_cost.sum()}\n")
-        return self._config
+        return self.config
 
     def stats_volume_vs_baseline(self) -> None:
         """
