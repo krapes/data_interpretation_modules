@@ -25,6 +25,12 @@ class TopBottomThreshold:
         client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='10GB', silence_logs='error')
 
     def calibrate_thresholds(self, df: pd.DataFrame, **kwargs):
+        """
+        Produce a model with the data provided in df
+
+        Args:
+            df (dataframe): training data
+        """
         if self._repetitions is None:
             raise Exception(f"TopBottomThreshold._repetitions cannot be None")
         if self.costs is None:

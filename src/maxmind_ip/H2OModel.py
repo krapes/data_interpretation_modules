@@ -41,7 +41,16 @@ class H20Model:
         else:
             h2o.init()
 
-    def score(self, today: pd.DataFrame):
+    def score(self, today: pd.DataFrame) -> pd.DataFrame:
+        """
+        Predicts values for events provided in dataframe today, then compares
+        these predictions with the ground truth in column fraud. For each comparison
+        it labels the corresponding confusion matrix quadrent in column real_result
+
+        Args:
+            today (dataframe): lines of risk_score / corridor information to make predictions
+        Returns: dataframe: same dataframe with prediction and real_results columns added
+        """
         if self.threshold is None:
             raise Exception(f"self.threshold is {self.threshold}."
                             "Run the calibrate_thresholds method before running score")
@@ -53,6 +62,15 @@ class H20Model:
         return today
 
     def calibrate_thresholds(self, df: pd.DataFrame, **kwargs):
+        """
+        Produce a model with the data provided in df
+
+        Args:
+            df (dataframe): training data
+        """
+        if self.costs is None:
+            raise Exception("TopBottomThreshold.costs cannot be None")
+
         if self.model_type == 'GradientBoosting':
             self.wipe_h2o_cluster()
             train, _ = self.df_to_hf(df, ['corridor', 'risk_score', 'fraud', 'weight'], ['corridor', 'fraud'])
@@ -107,8 +125,6 @@ class H20Model:
             t_cost, df = outcome(df, self.inverse_costs, f"CM_{t}", f"costs_{t}")
             matrix[str(model.model_id)]['x'].append(t)
             matrix[str(model.model_id)]['y'].append(t_cost)
-        # title = f'threshold_calculation_{model.model_id}'
-        # self.plot(matrix, title, f"{self.dir_path}/plots/{title}.png")
 
         # Return threshold that produced the minimum cost
         idx_min_cost = matrix[str(model.model_id)]['y'].index(min(matrix[str(model.model_id)]['y']))
@@ -251,13 +267,21 @@ class H20Model:
         return hf, cleaned_df
 
     def wipe_h2o_cluster(self):
-        # Wipe the cloud with a cluster restart
-        # (the models, grids, and functions will no longer be available)
+        """
+        This function wipes all archives from the h2O cluster, the same effect
+        as restarting the instance.
+
+        We do this to prevent old models or grid searches from being accedently being
+        considered in current or future calculations.
+        """
         h_objects = h2o.ls()
         logging.info(h_objects)
         for key in h_objects['key']:
+            # This try/except exists because the server is throwing an H2OServer
+            # error when attempting to delete the custom loss metric.
+            # TODO: Why does the this fail when deleting cost_matrix_loss_metric?
             try:
                 h2o.remove(key)
             except:
                 logging.info(f"Error while attempting to remove {key}")
-        # append information gained in this iteration
+
