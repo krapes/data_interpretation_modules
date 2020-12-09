@@ -28,7 +28,7 @@ import dask
 import dask.dataframe as dd
 from dask.distributed import Client
 
-client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='8GB')
+client = Client(n_workers=4, threads_per_worker=8, processes=False, memory_limit='10GB', silence_logs='error')
 
 from typing import Dict, TypedDict, Any, Tuple, List
 
@@ -90,7 +90,7 @@ class TopBottomThreshold:
 
                     Returns: int, int: threshold_bottom, threshold_top
                 """
-                threshold_bottom = random.randrange(1, 850, 1)
+                threshold_bottom = random.randrange(25, 850, 1)
                 threshold_top = random.randrange(threshold_bottom, 1000, 1)
                 return threshold_bottom / 10, threshold_top / 10
 
