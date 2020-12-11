@@ -72,7 +72,7 @@ class TopBottomThreshold:
 
                     Returns: int, int: threshold_bottom, threshold_top
                 """
-                threshold_bottom = random.randrange(25, 850, 1)
+                threshold_bottom = random.randrange(250, 850, 1)
                 threshold_top = random.randrange(threshold_bottom, 1000, 1)
                 return threshold_bottom / 10, threshold_top / 10
 

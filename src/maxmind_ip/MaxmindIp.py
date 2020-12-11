@@ -221,6 +221,11 @@ class MaxmindIp:
         if model_type != 'TopBottomThreshold':
             self.config['model'] = todays_update.best_case_model
             print(todays_update.best_case_model, self.config['model'])
+        elif model_type == 'TopBottomThreshold':
+            self.config['thresholds'] = todays_update.model_shell.thresholds
+            print(f"Model Configuration: {self.config['thresholds']}")
+        else:
+            raise Exception("We don't know how to save the results of this model!!!!")
         self._save_config()
 
         return todays_update.data
